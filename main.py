@@ -11,6 +11,7 @@ import gym_examples.envs
 
 gym_examples.register_envs()
 
+
 TRAIN = False
 EVAL_EPISODES = 10
 
