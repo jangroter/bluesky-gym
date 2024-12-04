@@ -44,3 +44,9 @@ def register_envs():
         entry_point="bluesky_gym.envs.merge_env:MergeEnv",
         max_episode_steps=50,
     )
+
+    register(
+        id="PathPlanningEnv-v0",
+        entry_point="bluesky_gym.envs.pathplanning_env:PathPlanning2DEnv",
+        max_episode_steps=20,
+    )
