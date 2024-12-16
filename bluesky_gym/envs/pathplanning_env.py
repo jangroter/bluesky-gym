@@ -175,7 +175,7 @@ class PathPlanningEnv(gym.Env):
         main MDP logic is contained here
         """
         self.segment_reward = 0
-        self._get_action(action)
+        self._set_action(action)
         while not self.wpt_reach:
             bs.sim.step()
             self._update_wpt_reach()
@@ -337,3 +337,162 @@ class PathPlanningEnv(gym.Env):
         if dis_origin > MAX_DISTANCE*1.15:
             self.truncated = True
         return self.truncated
+
+    def _set_action(self,action):
+        """
+        transforms action to a waypoint based on current position of the aircraft and specified action
+        """
+        distance = max(max(abs(action[0]*MAX_DIS_NEXT_WPT), abs(action[1]*MAX_DIS_NEXT_WPT)), MIN_DIS_NEXT_WPT)
+        bearing = np.rad2deg(np.arctan2(action[0],action[1]))
+
+        ac_lat = bs.traf.lat[0]
+        ac_lon = bs.traf.lon[0]
+
+        new_lat, new_lon = fn.get_point_at_distance(ac_lat, ac_lon, distance, bearing)
+        bs.traf.ap.route[0].addwptStack(0, f'{new_lat}, {new_lon}')
+
+    def _set_terminal_conditions(self):
+        """
+        Creates the terminal conditions surrounding the FAF to ensure correct approach angle
+
+        If render mode is set to 'human' also already creates the required elements for plotting 
+        these terminal conditions in the rendering window
+        """
+        num_points = 36 # number of straight line segments that make up the circle
+
+        faf_lat, faf_lon = fn.get_point_at_distance(RUNWAYS_SCHIPHOL_FAF[self.runway]['lat'],
+                                                    RUNWAYS_SCHIPHOL_FAF[self.runway]['lon'],
+                                                    FAF_DISTANCE,
+                                                    RUNWAYS_SCHIPHOL_FAF[self.runway]['track']-180)
+        
+        # Compute bounds for the merge angles from FAF
+        cw_bound = ((RUNWAYS_SCHIPHOL_FAF[self.runway]['track']-180+ 360)%360) + (IAF_ANGLE/2)
+        ccw_bound = ((RUNWAYS_SCHIPHOL_FAF[self.runway]['track']-180+ 360)%360) - (IAF_ANGLE/2)
+
+        angles = np.linspace(cw_bound,ccw_bound,num_points)
+        lat_iaf, lon_iaf = fn.get_point_at_distance(faf_lat, faf_lon, IAF_DISTANCE, angles)
+
+        command = 'POLYLINE SINK'
+        for i in range(0,len(lat_iaf)):
+            command += ' '+str(lat_iaf[i])+' '
+            command += str(lon_iaf[i])
+        bs.stack.stack(command)
+    
+        bs.stack.stack(f'POLYLINE RESTRICT {lat_iaf[0]} {lon_iaf[0]} {faf_lat} {faf_lon} {lat_iaf[-1]} {lon_iaf[-1]}')
+        bs.stack.stack('COLOR RESTRICT red')
+
+        if self.render_mode == 'human':
+            env_max_distance = np.sqrt((MAX_DISTANCE)**2 + (MAX_DISTANCE)**2) #km
+            lat_ref_point,lon_ref_point = bs.tools.geo.kwikpos(SCHIPHOL[0], SCHIPHOL[1], 315, env_max_distance/NM2KM)
+            self.screen_coords = [lat_ref_point,lon_ref_point]
+            coordinates = np.empty(2 * 36, dtype=np.float32)  # Create empty array
+            coordinates[0::2] = lat_iaf  # Fill array lat0,lon0,lat1,lon1....
+            coordinates[1::2] = lon_iaf
+
+            line_arc = np.reshape(coordinates, (len(coordinates) // 2, 2))
+            line_restrict = np.array([[lat_iaf[0],lon_iaf[0]],[faf_lat, faf_lon],[lat_iaf[-1], lon_iaf[-1]]])
+
+            # Convert all coordinates to Pygame window reference frame
+            qdr, dis = bs.tools.geo.kwikqdrdist(self.screen_coords[0], self.screen_coords[1], line_arc[:,0], line_arc[:,1])
+            dis = dis*NM2KM
+            x_arc = ((np.sin(np.deg2rad(qdr))*dis)/(MAX_DISTANCE*2))*self.window_width
+            y_arc = ((-np.cos(np.deg2rad(qdr))*dis)/(MAX_DISTANCE*2))*self.window_width
+            line_arc_pg = list(zip(x_arc, y_arc))
+
+            self.line_arc_pg = [(float(x), float(y)) for x, y in line_arc_pg]
+
+            qdr, dis = bs.tools.geo.kwikqdrdist(self.screen_coords[0], self.screen_coords[1], line_restrict[:,0], line_restrict[:,1])
+            dis = dis*NM2KM
+            x_restrict = ((np.sin(np.deg2rad(qdr))*dis)/(MAX_DISTANCE*2))*self.window_width
+            y_restrict = ((-np.cos(np.deg2rad(qdr))*dis)/(MAX_DISTANCE*2))*self.window_width
+            line_restrict_pg = list(zip(x_restrict, y_restrict))
+
+            self.line_restrict_pg = [(float(x), float(y)) for x, y in line_restrict_pg]
+
+    def _get_spawn(self):
+        """
+        Determine the random spawn conditions for the aircraft during training,
+        uses a random uniform spawn distance, because of this, area further away from the
+        destination are explored less, due to area scaling quadratically with the radius/distance
+
+        Could be interesting to build a toggle for different spawn functions.
+        """
+        spawn_bearing = np.random.uniform(0,360)
+        spawn_distance = max(np.random.uniform(0,0.9)*MAX_DISTANCE,
+                             MIN_DISTANCE)
+        spawn_lat, spawn_lon = fn.get_point_at_distance(SCHIPHOL[0],SCHIPHOL[1],spawn_distance,spawn_bearing)
+        spawn_heading = (spawn_bearing + 180 + 360)%360
+
+        return spawn_lat, spawn_lon, spawn_heading
+
+    def _render_frame(self):
+        """
+        handles rendering, needs to be fixed to only render the background surface once instead of on each frame.
+        """
+
+        if self.window is None and self.render_mode == "human":
+            pygame.init()
+            pygame.display.init()
+            self.window = pygame.display.set_mode(self.window_size)
+
+        if self.clock is None and self.render_mode == "human":
+            self.clock = pygame.time.Clock()
+
+        # pygame.draw.line(canvas,
+        #     (235, 52, 52),
+        #     (x_actor, y_actor),
+        #     (x_actor+heading_end_x, y_actor-heading_end_y),
+        #     width = 5
+        # )
+
+        # Create background image from population data
+        # pop_array = np.genfromtxt('bluesky_gym/envs/data/population_1km.csv', delimiter = ' ')
+        # x_index_min = int(((500000)/1000)-(MAX_DISTANCE))
+        # x_index_max = int(((500000)/1000)+(MAX_DISTANCE))
+        # y_index_min = int(((500000)/1000)-(MAX_DISTANCE))
+        # y_index_max = int(((500000)/1000)+(MAX_DISTANCE))
+
+        # pop_array = pop_array[y_index_min:y_index_max,x_index_min:x_index_max]
+        # c_map = cm.get_cmap("Blues").copy()
+        # c_map.set_bad((0.8,0.8,0.9))
+        # norm=LogNorm(vmin=100,vmax=100000)
+
+        # normalized_array = norm(pop_array)
+
+        # colored_array = c_map(normalized_array)[:, :, :3]  # Apply colormap and drop alpha channel
+        # colored_array = (colored_array * 255).astype(np.uint8)  # Convert to 0-255 for Pygame
+
+        # # Convert the array to a Pygame surface
+        # surface = pygame.surfarray.make_surface(np.transpose(colored_array, (1, 0, 2)))
+        surface = pygame.Surface(self.window_size)
+        surface.fill((255,255,255))
+        # Scale the surface to fit the screen
+        surface = pygame.transform.scale(surface, (self.window_width, self.window_height))
+
+        # Draw the FAF and IAF
+        pygame.draw.lines(surface, (0, 0, 0), False, self.line_arc_pg, 3)
+        pygame.draw.lines(surface, (255, 0, 0), False, self.line_restrict_pg, 2)
+
+        ### PLOTTING OF THE AIRCRAFT AND WAYPOINTS ###
+        ac_lat, ac_lon = bs.traf.lat[0], bs.traf.lon[0]
+
+        qdr, dis = bs.tools.geo.kwikqdrdist(self.screen_coords[0], self.screen_coords[1], ac_lat, ac_lon)
+        dis = dis*NM2KM
+        x_ac = ((np.sin(np.deg2rad(qdr))*dis)/(MAX_DISTANCE*2))*self.window_width
+        y_ac = ((-np.cos(np.deg2rad(qdr))*dis)/(MAX_DISTANCE*2))*self.window_width
+
+        pygame.draw.circle(surface, (0,0,0), (x_ac,y_ac),5)
+
+        wpt_lat, wp_lon = bs.traf.actwp.lat[0], bs.traf.actwp.lon[0]
+        qdr, dis = bs.tools.geo.kwikqdrdist(self.screen_coords[0], self.screen_coords[1], wpt_lat, wp_lon)
+        dis = dis*NM2KM
+        x_wpt = ((np.sin(np.deg2rad(qdr))*dis)/(MAX_DISTANCE*2))*self.window_width
+        y_wpt = ((-np.cos(np.deg2rad(qdr))*dis)/(MAX_DISTANCE*2))*self.window_width
+
+        pygame.draw.circle(surface, (255,0,0), (x_wpt,y_wpt),5)
+
+        self.window.blit(surface, (0,0))
+        pygame.display.update()
+
+        self.clock.tick(self.metadata["render_fps"])
+
