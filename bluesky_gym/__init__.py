@@ -50,3 +50,9 @@ def register_envs():
         entry_point="bluesky_gym.envs.pathplanning_env:PathPlanning2DEnv",
         max_episode_steps=20,
     )
+
+    register(
+        id="PathPlanningEnv-v1",
+        entry_point="bluesky_gym.envs.pathplanning_env_v2:PathPlanning2DEnv_V2",
+        max_episode_steps=10,
+    )

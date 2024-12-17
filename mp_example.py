@@ -20,9 +20,9 @@ from bluesky_gym.utils import logger
 
 bluesky_gym.register_envs()
 
-env_name = 'SectorCREnv-v0'
+env_name = 'PathPlanningEnv-v0'
 algorithm = SAC
-num_cpu = 2
+num_cpu = 4
 
 # Initialize logger
 log_dir = f'./logs/{env_name}/'
@@ -51,9 +51,9 @@ if __name__ == "__main__":
     env = make_vec_env(make_env, 
             n_envs = num_cpu,
             vec_env_cls=SubprocVecEnv)
-    model = algorithm("MultiInputPolicy", env, verbose=1,learning_rate=3e-4)
+    model = algorithm("MultiInputPolicy", env, verbose=1,learning_rate=3e-3)
     if TRAIN:
-        model.learn(total_timesteps=2e6, callback=csv_logger_callback)
+        model.learn(total_timesteps=2e5, callback=csv_logger_callback)
         model.save(f"models/{env_name}/{env_name}_{str(algorithm.__name__)}/model_mp")
         del model
     env.close()

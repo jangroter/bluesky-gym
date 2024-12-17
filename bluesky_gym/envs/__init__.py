@@ -6,3 +6,4 @@ from bluesky_gym.envs.horizontal_cr_env import *
 from bluesky_gym.envs.merge_env import *
 from bluesky_gym.envs.sector_cr_env import *
 from bluesky_gym.envs.pathplanning_env import *
+from bluesky_gym.envs.pathplanning_env_v2 import *
