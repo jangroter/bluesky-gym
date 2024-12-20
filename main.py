@@ -18,7 +18,7 @@ from bluesky_gym.utils import logger
 
 bluesky_gym.register_envs()
 
-env_name = 'StaticObstacleEnv-v0'
+env_name = 'SectorCREnv-v0'
 algorithm = SAC
 
 # Initialize logger
@@ -54,5 +54,7 @@ if __name__ == "__main__":
             action, _states = model.predict(obs, deterministic=True)
             obs, reward, done, truncated, info = env.step(action[()])
             tot_rew += reward
+            import code
+            code.interact(local=locals())
         print(tot_rew)
     env.close()
