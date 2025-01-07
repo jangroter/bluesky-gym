@@ -13,6 +13,8 @@ action_dim = env.action_space('KL001').shape[0]
 observation_dim = env.observation_space('KL001').shape[0]
 n_agents = env.num_ac 
 
+num_episodes = 10_000_000
+
 Buffer = ReplayBuffer(obs_dim = observation_dim,
                       action_dim = action_dim,
                       n_agents = n_agents,
@@ -48,7 +50,35 @@ obs_array_n = np.array(list(observations.values()))
 rew_array = np.array(list(rewards.values()))
 done = list(dones.values())[0]
 
-model.store_transition(obs_array,act_array,obs_array_n,rew_array,done)
+# model.store_transition(obs_array,act_array,obs_array_n,rew_array,done)
+
+total_rew = np.array([])
+
+for episode in range(num_episodes):
+    observations, infos = env.reset()
+    done = False
+    rew = 0
+    while not done:
+        obs_array = np.array(list(observations.values()))
+        act_array = model.get_action(obs_array)
+
+        actions = {agent: action for agent, action in zip(agents,act_array)}
+
+        observations, rewards, dones, truncates, infos = env.step(actions)
+
+        obs_array_n = np.array(list(observations.values()))
+        rew_array = np.array(list(rewards.values()))
+        rew += rew_array.mean()
+
+        if list(dones.values())[0] or list(truncates.values())[0]:
+            done = True
+
+        model.store_transition(obs_array,act_array,obs_array_n,rew_array,False)
+
+    total_rew = np.append(total_rew,rew)
+    if episode % 10 == 0:
+        print(f'episode: {episode}, avg rew: {total_rew[-100:].mean()}')
+
 
 import code
 code.interact(local=locals())

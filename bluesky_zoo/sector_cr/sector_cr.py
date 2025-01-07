@@ -102,8 +102,8 @@ class SectorCR(ParallelEnv):
         self.num_episodes += 1
         if self.num_episodes > 1:
             self.reward_array = np.append(self.reward_array, self.total_reward)
-            print(self.num_episodes)
-            print(self.reward_array[-100:].mean())
+            # print(self.num_episodes)
+            # print(self.reward_array[-100:].mean())
         self.total_reward = 0
         self.total_intrusions = 0
         self.average_drift = np.array([])
