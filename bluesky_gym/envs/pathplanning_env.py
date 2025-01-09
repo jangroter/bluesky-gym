@@ -325,6 +325,8 @@ class PathPlanningEnv(gym.Env):
             self.segment_reward += -1
             self.terminated = True
 
+        return self.terminated
+
     def _get_truncated(self):
         """
         Check to see if the aircraft is too far out of schiphol,
