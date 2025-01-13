@@ -102,8 +102,7 @@ class SectorCR(ParallelEnv):
         self.num_episodes += 1
         if self.num_episodes > 1:
             self.reward_array = np.append(self.reward_array, self.total_reward)
-            print(self.num_episodes)
-            print(self.reward_array[-100:].mean())
+            print(f'episode: {self.num_episodes}, avg rew: {self.reward_array[-100:].mean()}')
         self.total_reward = 0
         self.total_intrusions = 0
         self.average_drift = np.array([])
@@ -154,7 +153,7 @@ class SectorCR(ParallelEnv):
 
         # truncate instead of terminate to avoid aircraft learning to exit sector fast
         dones = self._get_dones()
-        truncates = self._check_inside_airspace()\
+        truncates = self._check_inside_airspace()
         
         # important step to reset the agents, mandatory by pettingzoo API
         if any(dones.values()) or all(truncates.values()):

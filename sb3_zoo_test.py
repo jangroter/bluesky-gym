@@ -17,7 +17,7 @@ from stable_baselines3.sac import MlpPolicy
 
 
 from pettingzoo.sisl import waterworld_v4
-from bluesky_zoo import sector_cr_v0
+from bluesky_zoo import sector_cr_v0, merge_v0
 
 
 def train_sector_supersuit(
@@ -31,13 +31,13 @@ def train_sector_supersuit(
 
     # Convert to vector environment
     env = ss.pettingzoo_env_to_vec_env_v1(env)
-    env = ss.concat_vec_envs_v1(env, 1, num_cpus=8, base_class="stable_baselines3")
+    env = ss.concat_vec_envs_v1(env, 1, num_cpus=1, base_class="stable_baselines3")
 
     # Note: Waterworld's observation space is discrete (242,) so we use an MLP policy rather than CNN
     model = SAC(
         MlpPolicy,
         env,
-        verbose=1,
+        verbose=0,
         learning_rate=1e-4,
         batch_size=1024,
     )
@@ -77,13 +77,15 @@ def eval_sector(env_fn, num_games: int = 100, render_mode: str | None = None, **
     for i in range(num_games):
         observations, infos = env.reset(seed=i)
         done = False
-        while not done:
+        trunc = False
+        while not done and not trunc:
             actions = {agent: model.predict(obs, deterministic=True)[0] for agent, obs in zip(env.possible_agents, observations.values())}
             
             observations, rewards, dones, truncates, infos = env.step(actions)
-            import code
-            code.interact(local=locals())
-            done = truncates['KL001']
+
+            done = dones['KL001']
+            trunc = truncates['KL001']
+
         
             # for a in env.agents:
             #     rewards[a] += env.rewards[a]
@@ -103,11 +105,11 @@ def eval_sector(env_fn, num_games: int = 100, render_mode: str | None = None, **
 
 if __name__ == "__main__":
 
-    env_fn = sector_cr_v0.SectorCR
+    env_fn = merge_v0.MergeEnv
     
 
     # Train a model (takes ~3 minutes on GPU)
-    # train_sector_supersuit(env_fn, steps=1_000_000, seed=0)
+    train_sector_supersuit(env_fn, steps=1_000_000, seed=0)
 
     # Evaluate 10 games (average reward should be positive but can vary significantly)
     eval_sector(env_fn, num_games=10, render_mode='human')
