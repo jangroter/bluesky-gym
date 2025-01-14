@@ -31,11 +31,11 @@ from bluesky_gym.envs.common.screen_dummy import ScreenDummy
 import bluesky_gym.envs.common.functions as fn
 import random
 
-DISTANCE_MARGIN = 10 # km
-REACH_REWARD = 1
+DISTANCE_MARGIN = 20 # km
+REACH_REWARD = 0#1
 
-DRIFT_PENALTY = -0.1
-INTRUSION_PENALTY = -1
+DRIFT_PENALTY = -0.02 #0.1
+INTRUSION_PENALTY = -0.2#-0.2 #1
 
 INTRUSION_DISTANCE = 4 # NM
 
@@ -45,8 +45,8 @@ SPAWN_DISTANCE_MAX = 200
 INTRUDER_DISTANCE_MIN = 20
 INTRUDER_DISTANCE_MAX = 500
 
-D_HEADING = 15
-D_SPEED = 20 
+D_HEADING = 3 #15
+D_SPEED = 4 #20 
 
 AC_SPD = 150
 
@@ -56,7 +56,7 @@ MpS2Kt = 1.94384
 ACTION_FREQUENCY = 10
 
 NUM_AC = 20
-NUM_AC_STATE = 3
+NUM_AC_STATE = 5
 NUM_WAYPOINTS = 1
 
 RWY_LAT = 52.36239301495972
@@ -75,7 +75,7 @@ class MergeEnv(ParallelEnv):
         "render_modes": ["rgb_array","human"],
          "render_fps": 120}
 
-    def __init__(self, render_mode=None, n_agents=10, time_limit=150):
+    def __init__(self, render_mode=None, n_agents=10, time_limit=500):
         self.window_width = 750
         self.window_height = 500
         self.window_size = (self.window_width, self.window_height) # Size of the rendered environment
@@ -95,7 +95,7 @@ class MergeEnv(ParallelEnv):
 
         bs.init(mode='sim', detached=True)
         bs.scr = ScreenDummy()
-        bs.stack.stack('DT 5;FF')
+        bs.stack.stack('DT 1;FF')
 
         # initialize values used for logging -> input in _get_info
         self.total_reward = 0
@@ -152,8 +152,8 @@ class MergeEnv(ParallelEnv):
                 observations = self._get_observation()
                 self._render_frame()
 
-        observations = self._get_observation()
         rewards, dones = self._get_reward()
+        observations = self._get_observation()
         
         if self.time_limit < self.steps:
             time_exceeded = True
@@ -375,11 +375,12 @@ class MergeEnv(ParallelEnv):
             dh = action[0] * D_HEADING
             dv = action[1] * D_SPEED
             heading_new = fn.bound_angle_positive_negative_180(bs.traf.hdg[bs.traf.id2idx(agent)] + dh)
-            speed_new = (bs.traf.tas[bs.traf.id2idx(agent)] + dv) * MpS2Kt
+            speed_new = (bs.traf.cas[bs.traf.id2idx(agent)] + dv)# * MpS2Kt
 
             # print(speed_new)
             bs.stack.stack(f"HDG {agent} {heading_new}")
-            bs.stack.stack(f"SPD {agent} {speed_new}")
+            bs.traf.ap.selspdcmd(bs.traf.id2idx(agent),speed_new)
+            # bs.stack.stack(f"SPD {agent} {speed_new}")
 
     def _render_frame(self):
         if self.window is None and self.render_mode == "human":

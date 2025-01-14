@@ -38,7 +38,7 @@ def train_sector_supersuit(
         MlpPolicy,
         env,
         verbose=0,
-        learning_rate=1e-4,
+        learning_rate=1e-3,
         batch_size=1024,
     )
 
@@ -80,7 +80,8 @@ def eval_sector(env_fn, num_games: int = 100, render_mode: str | None = None, **
         trunc = False
         while not done and not trunc:
             actions = {agent: model.predict(obs, deterministic=True)[0] for agent, obs in zip(env.possible_agents, observations.values())}
-            
+            # import code
+            # code.interact(local=locals())
             observations, rewards, dones, truncates, infos = env.step(actions)
 
             done = dones['KL001']
@@ -109,7 +110,7 @@ if __name__ == "__main__":
     
 
     # Train a model (takes ~3 minutes on GPU)
-    train_sector_supersuit(env_fn, steps=1_000_000, seed=0)
+    train_sector_supersuit(env_fn, steps=10_000_000, seed=0)
 
     # Evaluate 10 games (average reward should be positive but can vary significantly)
     eval_sector(env_fn, num_games=10, render_mode='human')
