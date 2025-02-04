@@ -27,7 +27,7 @@ INTRUDER_DISTANCE_MAX = 500
 D_HEADING = 15
 D_SPEED = 20 
 
-AC_SPD = 150
+AC_SPD = 100
 
 NM2KM = 1.852
 MpS2Kt = 1.94384
@@ -287,11 +287,11 @@ class MergeEnv(gym.Env):
         dh = action[0] * D_HEADING
         dv = action[1] * D_SPEED
         heading_new = fn.bound_angle_positive_negative_180(bs.traf.hdg[bs.traf.id2idx('KL001')] + dh)
-        speed_new = (bs.traf.tas[bs.traf.id2idx('KL001')] + dv) * MpS2Kt
+        speed_new = (bs.traf.cas[bs.traf.id2idx('KL001')] + dv) * MpS2Kt
 
         bs.stack.stack(f"HDG KL001 {heading_new}")
         bs.stack.stack(f"SPD KL001 {speed_new}")
-
+        
     def _render_frame(self):
         if self.window is None and self.render_mode == "human":
             pygame.init()

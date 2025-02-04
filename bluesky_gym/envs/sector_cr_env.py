@@ -47,7 +47,6 @@ class SectorCREnv(gym.Env):
         self.window_height = 512
         self.window_size = (self.window_width, self.window_height) # Size of the rendered environment
         self.density_mode = ac_density_mode
-        self.reset_counter = 0
         self.poly_name = 'airspace'
         # Feel free to add more observation spaces
         self.observation_space = spaces.Dict(
@@ -113,8 +112,6 @@ class SectorCREnv(gym.Env):
         if self.render_mode == "human":
             self._render_frame()
 
-        self.reset_counter += 1
-
         return observation, info
     
     def step(self, action):
@@ -177,7 +174,7 @@ class SectorCREnv(gym.Env):
         d_list = [np.random.uniform(0, perim_tot) for _ in range(self.num_ac)] # Each ac including agent is given a waypoint
         d_list.sort()
         
-        self.wpts = []
+        self.wpts = [] # In terms of NM
         current_d = 0
         
         for d in d_list:
@@ -217,7 +214,7 @@ class SectorCREnv(gym.Env):
             wpt = fn.nm_to_latlong(CENTER, self.wpts[i])
             init_pos = init_p_latlong[i]
             hdg = fn.get_hdg(init_pos, wpt)
-            bs.traf.cre(acid=str(i), actype=AC_TYPE, aclat=init_pos[0], aclon=init_pos[1], achdg=hdg, acspd=AC_SPD)
+            bs.traf.cre(acid=str(i), actype=AC_TYPE, aclat=init_pos[0], aclon=init_pos[1], achdg=hdg, acspd=AC_SPD, acalt=ALTITUDE)
     
     def _get_info(self):
         # Here you implement any additional info that you want to log after an episode
@@ -259,7 +256,9 @@ class SectorCREnv(gym.Env):
         ac_hdg = bs.traf.hdg[ac_idx]
         
         # Get and decompose agent aircaft drift
-        wpt_qdr, _  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], self.wpts[0][0], self.wpts[0][1])
+        wpts = fn.nm_to_latlong(CENTER, self.wpts[ac_idx])
+        wpt_qdr, _  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], wpts[0], wpts[1])
+
         drift = ac_hdg - wpt_qdr
         drift = fn.bound_angle_positive_negative_180(drift)
         self.drift = drift
@@ -317,9 +316,8 @@ class SectorCREnv(gym.Env):
         dh = action[0] * D_HEADING
         dv = action[1] * D_VELOCITY
         heading_new = fn.bound_angle_positive_negative_180(bs.traf.hdg[bs.traf.id2idx(ACTOR)] + dh)
-        speed_new = (bs.traf.tas[bs.traf.id2idx(ACTOR)] + dv) * MpS2Kt
+        speed_new = (bs.traf.cas[bs.traf.id2idx(ACTOR)] + dv) * MpS2Kt
 
-        # print(speed_new)
         bs.stack.stack(f"HDG {ACTOR} {heading_new}")
         bs.stack.stack(f"SPD {ACTOR} {speed_new}")
 

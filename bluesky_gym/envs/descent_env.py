@@ -59,7 +59,7 @@ class DescentEnv(gym.Env):
             }
         )
        
-        self.action_space = spaces.Box(-1, 1, shape=(2,), dtype=np.float64)
+        self.action_space = spaces.Box(-1, 1, shape=(1,), dtype=np.float64)
 
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
