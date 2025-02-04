@@ -68,7 +68,7 @@ FIX_LAT, FIX_LON = fn.get_point_at_distance(RWY_LAT, RWY_LON, distance_faf_rwy, 
 
 class MergeEnv(ParallelEnv):
     """ 
-    Single-agent arrival manager environment - only one aircraft (ownship) is merged into NPC stream of aircraft.
+    Multi-agent arrival manager environment - all aircraft are required to merge into a single traffic stream.
     """
     metadata = {
         "name": "merge_v0",
@@ -80,8 +80,8 @@ class MergeEnv(ParallelEnv):
         self.window_height = 500
         self.window_size = (self.window_width, self.window_height) # Size of the rendered environment
 
-        self.num_ac = n_agents
-        self.agents = self._get_agents(self.num_ac)
+        self.n_agents = n_agents
+        self.agents = self._get_agents(self.n_agents)
         self.possible_agents = self.agents[:]
 
         self.time_limit = time_limit
@@ -189,7 +189,7 @@ class MergeEnv(ParallelEnv):
         return [f'kl00{i+1}'.upper() for i in range(n_agents)]
     
     def _gen_aircraft(self):
-        for agent, idx in zip(self.agents,np.arange(self.num_ac)):
+        for agent, idx in zip(self.agents,np.arange(self.n_agents)):
             bearing_to_pos = random.uniform(-D_HEADING, D_HEADING) # heading radial towards FAF
             distance_to_pos = random.uniform(INTRUDER_DISTANCE_MIN,INTRUDER_DISTANCE_MAX) # distance to faf 
             lat_ac, lon_ac = fn.get_point_at_distance(self.wpt_lat, self.wpt_lon, distance_to_pos, bearing_to_pos)
@@ -238,10 +238,10 @@ class MergeEnv(ParallelEnv):
             vx = np.cos(np.deg2rad(ac_hdg)) * bs.traf.tas[ac_idx]
             vy = np.sin(np.deg2rad(ac_hdg)) * bs.traf.tas[ac_idx]
             
-            distances = bs.tools.geo.kwikdist_matrix(bs.traf.lat[0], bs.traf.lon[0], bs.traf.lat,bs.traf.lon)
+            distances = bs.tools.geo.kwikdist_matrix(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], bs.traf.lat,bs.traf.lon)
             ac_idx_by_dist = np.argsort(distances) # sort aircraft by distance to ownship
 
-            for i in range(self.num_ac):
+            for i in range(self.n_agents):
                 int_idx = ac_idx_by_dist[i]
                 if int_idx == ac_idx:
                     continue
@@ -358,7 +358,7 @@ class MergeEnv(ParallelEnv):
 
     def _check_intrusion(self, ac_idx):
         reward = 0
-        for i in range(self.num_ac):
+        for i in range(self.n_agents):
             int_idx = i
             if i == ac_idx:
                 continue
