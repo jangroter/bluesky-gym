@@ -409,11 +409,11 @@ class SectorCR(ParallelEnv):
             else:
                 truncs.append(True)
         truncs = [False] * len(truncs) if not all(truncs) else truncs # ensure all False or all True
-        trunctated = {
+        truncated = {
             a: t
             for a,t in zip(self.agents,truncs)
         }
-        return trunctated
+        return truncated
 
     def _get_dones(self):
         done = [False] * len(self.agents)
@@ -453,7 +453,7 @@ class SectorCR(ParallelEnv):
         coords = [((self.window_width/2)+point[0]*NM2KM*px_per_km, (self.window_height/2)-point[1]*NM2KM*px_per_km) for point in self.poly_points]
         pygame.draw.polygon(canvas, airspace_color, coords, width=2)
 
-        # Draw ownship
+        # Draw aircraft
         for agent in self.agents:
             ac_idx = bs.traf.id2idx(agent)
             ac_length = 10
@@ -502,54 +502,6 @@ class SectorCR(ParallelEnv):
                 radius = INTRUSION_DISTANCE*NM2KM*px_per_km/2,
                 width = 2
             )
-
-        # # Draw intruders
-        # ac_length = 3
-
-        # for i in range(self.num_ac-1):
-        #     int_idx = i+1
-        #     int_hdg = bs.traf.hdg[int_idx]
-        #     heading_end_x = np.cos(np.deg2rad(int_hdg)) * ac_length
-        #     heading_end_y = np.sin(np.deg2rad(int_hdg)) * ac_length
-
-        #     int_qdr, int_dis = bs.tools.geo.kwikqdrdist(CENTER[0], CENTER[1], bs.traf.lat[int_idx], bs.traf.lon[int_idx])
-        #     separation = bs.tools.geo.kwikdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], bs.traf.lat[int_idx], bs.traf.lon[int_idx])
-
-        #     # Determine color
-        #     if separation < INTRUSION_DISTANCE:
-        #         color = (220,20,60)
-        #     else: 
-        #         color = (80,80,80)
-
-        #     x_pos = (self.window_width/2)+(np.cos(np.deg2rad(int_qdr))*(int_dis * NM2KM)*px_per_km)
-        #     y_pos = (self.window_height/2)-(np.sin(np.deg2rad(int_qdr))*(int_dis * NM2KM)*px_per_km)
-
-        #     pygame.draw.line(canvas,
-        #         color,
-        #         (x_pos,y_pos),
-        #         ((x_pos)+heading_end_x,(y_pos)-heading_end_y),
-        #         width = 4
-        #     )
-
-        #     # Draw heading line
-        #     heading_length = 20
-        #     heading_end_x = np.cos(np.deg2rad(int_hdg)) * heading_length
-        #     heading_end_y = np.sin(np.deg2rad(int_hdg)) * heading_length
-
-        #     pygame.draw.line(canvas,
-        #         color,
-        #         (x_pos,y_pos),
-        #         ((x_pos)+heading_end_x,(y_pos)-heading_end_y),
-        #         width = 1
-        #     )
-
-        #     pygame.draw.circle(
-        #         canvas, 
-        #         color,
-        #         (x_pos,y_pos),
-        #         radius = INTRUSION_DISTANCE*NM2KM*px_per_km,
-        #         width = 2
-        #     )
 
         self.window.blit(canvas, canvas.get_rect())
         pygame.display.update()

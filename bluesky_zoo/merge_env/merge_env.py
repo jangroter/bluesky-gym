@@ -248,7 +248,7 @@ class MergeEnv(ParallelEnv):
                 int_hdg = bs.traf.hdg[int_idx]
                 
                 # Intruder AC relative position, m
-                dist, brg = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], bs.traf.lat[int_idx],bs.traf.lon[int_idx]) 
+                brg, dist = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], bs.traf.lat[int_idx],bs.traf.lon[int_idx]) 
                 x_r = np.append(x_r, (dist * NM2KM * 1000) * np.cos(np.deg2rad(brg)))
                 y_r = np.append(y_r, (dist * NM2KM * 1000) * np.sin(np.deg2rad(brg)))
                 
@@ -300,6 +300,7 @@ class MergeEnv(ParallelEnv):
         }
 
     def _get_reward(self):
+        # TODO: have to check if setting all dones to True does not mess up the TD error
         rew = []
         dones = []
         for agent in self.agents:
