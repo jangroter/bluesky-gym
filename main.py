@@ -13,12 +13,13 @@ import numpy as np
 
 import bluesky_gym
 import bluesky_gym.envs
+from bluesky_gym.wrappers.uncertainty import NoisyObservationWrapper
 
 from bluesky_gym.utils import logger
 
 bluesky_gym.register_envs()
 
-env_name = 'StaticObstacleEnv-v0'
+env_name = 'PathPlanningEnv-v0'
 algorithm = SAC
 
 # Initialize logger
@@ -35,7 +36,7 @@ if __name__ == "__main__":
     obs, info = env.reset()
     model = algorithm("MultiInputPolicy", env, verbose=1,learning_rate=3e-4)
     if TRAIN:
-        model.learn(total_timesteps=2e6, callback=csv_logger_callback)
+        model.learn(total_timesteps=1e5, callback=csv_logger_callback)
         model.save(f"models/{env_name}/{env_name}_{str(algorithm.__name__)}/model")
         del model
     env.close()
@@ -43,16 +44,19 @@ if __name__ == "__main__":
     # Test the trained model
     model = algorithm.load(f"models/{env_name}/{env_name}_{str(algorithm.__name__)}/model", env=env)
     env = gym.make(env_name, render_mode="human")
+    noisy_env = NoisyObservationWrapper(env, noise_level=100)
     for i in range(EVAL_EPISODES):
 
         done = truncated = False
-        obs, info = env.reset()
+        obs, info = noisy_env.reset()
         tot_rew = 0
         while not (done or truncated):
             # action = np.array(np.random.randint(-100,100,size=(2))/100)
             # action = np.array([0,-1])
             action, _states = model.predict(obs, deterministic=True)
-            obs, reward, done, truncated, info = env.step(action[()])
+            obs, reward, done, truncated, info = noisy_env.step(action[()])
+            import code
+            code.interact(local=locals())
             tot_rew += reward
         print(tot_rew)
     env.close()

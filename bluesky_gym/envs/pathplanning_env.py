@@ -65,7 +65,7 @@ class PathPlanningEnv(gym.Env):
     """
     metadata = {"render_modes": ["rgb_array","human"], "render_fps": 1000}
 
-    def __init__(self, render_mode=None, runway="27", action_mode="wpt"):
+    def __init__(self, render_mode=None, runway="27", action_mode="hdg"):
         self.runway = runway
         self.window_width = 512
         self.window_height = 512
