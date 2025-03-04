@@ -238,76 +238,72 @@ class SectorCREnv(gym.Env):
 
         ac_idx = bs.traf.id2idx(ACTOR)
 
-        # Observation vector shape and components
-        self.cos_drift = np.array([])
-        self.sin_drift = np.array([])
-        self.airspeed = np.array([])
-        self.x_r = np.array([])
-        self.y_r = np.array([])
-        self.vx_r = np.array([])
-        self.vy_r = np.array([])
-        self.cos_track = np.array([])
-        self.sin_track = np.array([])
-        self.distances = np.array([])
-
-        # Drift of agent aircraft for reward calculation
-        drift = 0
+        x_r = np.array([])
+        y_r = np.array([])
+        vx_r = np.array([])
+        vy_r = np.array([])
+        cos_track = np.array([])
+        sin_track = np.array([])
+        distances = np.array([])
 
         ac_hdg = bs.traf.hdg[ac_idx]
         
         # Get and decompose agent aircaft drift
         wpts = fn.nm_to_latlong(CENTER, self.wpts[ac_idx])
         wpt_qdr, _  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], wpts[0], wpts[1])
-
         drift = ac_hdg - wpt_qdr
         drift = fn.bound_angle_positive_negative_180(drift)
         self.drift = drift
-        self.cos_drift = np.append(self.cos_drift, np.cos(np.deg2rad(drift)))
-        self.sin_drift = np.append(self.sin_drift, np.sin(np.deg2rad(drift)))
-
+        cos_drift = np.cos(np.deg2rad(drift))
+        sin_drift = np.sin(np.deg2rad(drift))
+    
         # Get agent aircraft airspeed, m/s
-        self.airspeed = np.append(self.airspeed, bs.traf.tas[ac_idx])
+        airspeed = bs.traf.tas[ac_idx]
 
-        vx = np.cos(np.deg2rad(ac_hdg)) * bs.traf.tas[ac_idx]
-        vy = np.sin(np.deg2rad(ac_hdg)) * bs.traf.tas[ac_idx]
+        vx = np.cos(np.deg2rad(ac_hdg)) * bs.traf.gs[ac_idx]
+        vy = np.sin(np.deg2rad(ac_hdg)) * bs.traf.gs[ac_idx]
 
         ac_loc = fn.latlong_to_nm(CENTER, np.array([bs.traf.lat[ac_idx], bs.traf.lon[ac_idx]])) * NM2KM * 1000 # Two-step conversion lat/long -> NM -> m
-        distances = [fn.euclidean_distance(ac_loc, fn.latlong_to_nm(CENTER, np.array([bs.traf.lat[i], bs.traf.lon[i]])) * NM2KM * 1000) for i in range(1, self.num_ac)]
-        ac_idx_by_dist = np.argsort(distances)
+        dist = [fn.euclidean_distance(ac_loc, fn.latlong_to_nm(CENTER, np.array([bs.traf.lat[i], bs.traf.lon[i]])) * NM2KM * 1000) for i in range(self.num_ac)]
+        ac_idx_by_dist = np.argsort(dist)
 
-        for i in range(self.num_ac-1):
-            ac_idx = ac_idx_by_dist[i]+1
-            int_hdg = bs.traf.hdg[ac_idx]
+        # quick import code dump to not forget that this should be unit checked
+
+        for i in range(self.num_ac):
+            int_idx = ac_idx_by_dist[i]
+            if int_idx == ac_idx:
+                continue
+            int_hdg = bs.traf.hdg[int_idx]
             
             # Intruder AC relative position, m
-            int_loc = fn.latlong_to_nm(CENTER, np.array([bs.traf.lat[ac_idx], bs.traf.lon[ac_idx]])) * NM2KM * 1000
-            self.x_r = np.append(self.x_r, int_loc[0] - ac_loc[0])
-            self.y_r = np.append(self.y_r, int_loc[1] - ac_loc[1])
+            int_loc = fn.latlong_to_nm(CENTER, np.array([bs.traf.lat[int_idx], bs.traf.lon[int_idx]])) * NM2KM * 1000
+            x_r = np.append(x_r, int_loc[0] - ac_loc[0])
+            y_r = np.append(y_r, int_loc[1] - ac_loc[1])
             
             # Intruder AC relative velocity, m/s
-            vx_int = np.cos(np.deg2rad(int_hdg)) * bs.traf.tas[ac_idx]
-            vy_int = np.sin(np.deg2rad(int_hdg)) * bs.traf.tas[ac_idx]
-            self.vx_r = np.append(self.vx_r, vx_int - vx)
-            self.vy_r = np.append(self.vy_r, vy_int - vy)
+            vx_int = np.cos(np.deg2rad(int_hdg)) * bs.traf.gs[int_idx]
+            vy_int = np.sin(np.deg2rad(int_hdg)) * bs.traf.gs[int_idx]
+            vx_r = np.append(vx_r, vx_int - vx)
+            vy_r = np.append(vy_r, vy_int - vy)
 
             # Intruder AC relative track, rad
             track = np.arctan2(vy_int - vy, vx_int - vx)
-            self.cos_track = np.append(self.cos_track, np.cos(track))
-            self.sin_track = np.append(self.sin_track, np.sin(track))
+            cos_track = np.append(cos_track, np.cos(track))
+            sin_track = np.append(sin_track, np.sin(track))
 
-            self.distances = np.append(self.distances, distances[ac_idx-1])
+            distances = np.append(distances, dist[int_idx])
 
         observation = {
-            "cos(drift)": self.cos_drift,
-            "sin(drift)": self.sin_drift,
-            "airspeed": (self.airspeed-150)/6,
-            "x_r": self.x_r[:NUM_AC_STATE]/13000,
-            "y_r": self.y_r[:NUM_AC_STATE]/13000,
-            "vx_r": self.vx_r[:NUM_AC_STATE]/32,
-            "vy_r": self.vy_r[:NUM_AC_STATE]/66,
-            "cos(track)": self.cos_track[:NUM_AC_STATE],
-            "sin(track)": self.sin_track[:NUM_AC_STATE],
-            "distances": (self.distances[:NUM_AC_STATE]-50000.)/15000.
+            "cos(drift)": np.array([cos_drift]),
+            "sin(drift)": np.array([sin_drift]),
+            "airspeed": np.array([(airspeed-150)/6]),
+            "x_r": x_r[:NUM_AC_STATE]/13000,
+            "y_r": y_r[:NUM_AC_STATE]/13000,
+            "vx_r": vx_r[:NUM_AC_STATE]/32,
+            "vy_r": vy_r[:NUM_AC_STATE]/66,
+            "cos(track)": cos_track[:NUM_AC_STATE],
+            "sin(track)": sin_track[:NUM_AC_STATE],
+            "distances": (distances[:NUM_AC_STATE]-50000.)/15000.
         }
 
         return observation
