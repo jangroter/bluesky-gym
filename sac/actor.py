@@ -58,7 +58,7 @@ class FeedForwardActor(Actor):
         for layer in self.layers:
             x = layer(x)
 
-        mu =  self.mu_layer(x).tanh()
+        mu =  self.mu_layer(x)#.tanh()
 
         log_std = self.log_std_layer(x).tanh()
         log_std = self.log_std_min  + 0.5 * (
@@ -75,6 +75,6 @@ class FeedForwardActor(Actor):
         log_prob = log_prob.sum(-1, keepdim=True)
 
         if self.test:
-            return mu, log_prob
+            return mu.tanh(), log_prob
         
         return action, log_prob

@@ -100,9 +100,9 @@ class SectorCR(ParallelEnv):
         bs.tools.areafilter.deleteArea(self.poly_name)
         self.agents = self.possible_agents[:]
         self.num_episodes += 1
-        if self.num_episodes > 1:
-            self.reward_array = np.append(self.reward_array, self.total_reward)
-            print(f'episode: {self.num_episodes}, avg rew: {self.reward_array[-100:].mean()}')
+        # if self.num_episodes > 1:
+        #     self.reward_array = np.append(self.reward_array, self.total_reward)
+        #     print(f'episode: {self.num_episodes}, avg rew: {self.reward_array[-100:].mean()}')
         self.total_reward = 0
         self.total_intrusions = 0
         self.average_drift = np.array([])

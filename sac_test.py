@@ -6,6 +6,13 @@ from sac.replay_buffer import ReplayBuffer
 from sac.SAC import SAC
 
 import numpy as np
+import torch
+
+def save_models(model, weights_folder = 'sac/weights'):
+    torch.save(model.actor.state_dict(), weights_folder+"/actor.pt")
+    torch.save(model.critic_q.state_dict(), weights_folder+"/qf.pt")
+    torch.save(model.critic_q_target.state_dict(), weights_folder+"/qf_target.pt")
+
 
 env = sector_cr_v0.SectorCR(render_mode=None)
 
@@ -13,7 +20,7 @@ action_dim = env.action_space('KL001').shape[0]
 observation_dim = env.observation_space('KL001').shape[0]
 n_agents = env.num_ac 
 
-num_episodes = 10_000_000
+num_episodes = 1_000
 
 Buffer = ReplayBuffer(obs_dim = observation_dim,
                       action_dim = action_dim,
@@ -78,6 +85,7 @@ for episode in range(num_episodes):
     total_rew = np.append(total_rew,rew)
     if episode % 10 == 0:
         print(f'episode: {episode}, avg rew: {total_rew[-100:].mean()}')
+        save_models(model)
 
 
 import code
