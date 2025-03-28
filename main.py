@@ -13,13 +13,12 @@ import numpy as np
 
 import bluesky_gym
 import bluesky_gym.envs
-from bluesky_gym.wrappers.uncertainty import NoisyObservationWrapper
 
 from bluesky_gym.utils import logger
 
 bluesky_gym.register_envs()
 
-env_name = 'PathPlanningEnv-v0'
+env_name = 'SectorCREnv-v0'
 algorithm = SAC
 
 # Initialize logger
@@ -27,8 +26,8 @@ log_dir = f'./logs/{env_name}/'
 file_name = f'{env_name}_{str(algorithm.__name__)}.csv'
 csv_logger_callback = logger.CSVLoggerCallback(log_dir, file_name)
 
-TRAIN = False
-EVAL_EPISODES = 10
+TRAIN = True
+EVAL_EPISODES = 100
 
 
 if __name__ == "__main__":
@@ -43,20 +42,19 @@ if __name__ == "__main__":
     
     # Test the trained model
     model = algorithm.load(f"models/{env_name}/{env_name}_{str(algorithm.__name__)}/model", env=env)
-    env = gym.make(env_name, render_mode="human")
-    noisy_env = NoisyObservationWrapper(env, noise_level=100)
+    env = gym.make(env_name, render_mode=None)
+    total_reward = np.array([])
     for i in range(EVAL_EPISODES):
 
         done = truncated = False
-        obs, info = noisy_env.reset()
+        obs, info = env.reset()
         tot_rew = 0
         while not (done or truncated):
             # action = np.array(np.random.randint(-100,100,size=(2))/100)
             # action = np.array([0,-1])
             action, _states = model.predict(obs, deterministic=True)
-            obs, reward, done, truncated, info = noisy_env.step(action[()])
-            import code
-            code.interact(local=locals())
+            obs, reward, done, truncated, info = env.step(action[()])
             tot_rew += reward
-        print(tot_rew)
+        total_reward = np.append(total_reward,tot_rew)
+    print(total_reward.mean())
     env.close()
