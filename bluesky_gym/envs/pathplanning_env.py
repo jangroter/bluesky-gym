@@ -65,7 +65,7 @@ class PathPlanningEnv(gym.Env):
     """
     metadata = {"render_modes": ["rgb_array","human"], "render_fps": 1000}
 
-    def __init__(self, render_mode=None, runway="27", action_mode="wpt"):
+    def __init__(self, render_mode=None, runway=["27"], action_mode="wpt"):
         self.runway = runway
         self.window_width = 512
         self.window_height = 512
@@ -340,19 +340,20 @@ class PathPlanningEnv(gym.Env):
         Checks if the aircraft has passed the IAF beacon and can be routed to the FAF (SINK)
         or if it has missed approach by coming in with a too high turn radius requirements (RESTRICT)
         """
-        self.terminated = False
-        shapes = bs.tools.areafilter.basic_shapes
-        line_ac = Path(np.array([[self.lat, self.lon],[bs.traf.lat[0], bs.traf.lon[0]]]))
-        line_sink = Path(np.reshape(shapes['SINK'].coordinates, (len(shapes['SINK'].coordinates) // 2, 2)))
-        line_restrict = Path(np.reshape(shapes['RESTRICT'].coordinates, (len(shapes['RESTRICT'].coordinates) // 2, 2)))
+        for rwy in self.runway:
+            self.terminated = False
+            shapes = bs.tools.areafilter.basic_shapes
+            line_ac = Path(np.array([[self.lat, self.lon],[bs.traf.lat[0], bs.traf.lon[0]]]))
+            line_sink = Path(np.reshape(shapes[f'SINK{rwy}'].coordinates, (len(shapes[f'SINK{rwy}'].coordinates) // 2, 2)))
+            line_restrict = Path(np.reshape(shapes[f'RESTRICT{rwy}'].coordinates, (len(shapes[f'RESTRICT{rwy}'].coordinates) // 2, 2)))
 
-        if line_sink.intersects_path(line_ac):
-            self.segment_reward += 10
-            self.terminated = True
+            if line_sink.intersects_path(line_ac):
+                self.segment_reward += 10
+                self.terminated = True
 
-        if line_restrict.intersects_path(line_ac):
-            self.segment_reward += -1
-            self.terminated = True
+            if line_restrict.intersects_path(line_ac):
+                self.segment_reward += -1
+                self.terminated = True
 
         return self.terminated
 
@@ -384,7 +385,6 @@ class PathPlanningEnv(gym.Env):
             bearing = np.rad2deg(np.arctan2(action[0],action[1]))
             bs.traf.ap.selhdgcmd(0,bearing)
             
-
     def _set_terminal_conditions(self):
         """
         Creates the terminal conditions surrounding the FAF to ensure correct approach angle
@@ -392,56 +392,60 @@ class PathPlanningEnv(gym.Env):
         If render mode is set to 'human' also already creates the required elements for plotting 
         these terminal conditions in the rendering window
         """
-        num_points = 36 # number of straight line segments that make up the circle
+        self.line_arc_pg = []
+        self.line_restrict_pg = []
 
-        faf_lat, faf_lon = fn.get_point_at_distance(RUNWAYS_SCHIPHOL_FAF[self.runway]['lat'],
-                                                    RUNWAYS_SCHIPHOL_FAF[self.runway]['lon'],
-                                                    FAF_DISTANCE,
-                                                    RUNWAYS_SCHIPHOL_FAF[self.runway]['track']-180)
-        
-        # Compute bounds for the merge angles from FAF
-        cw_bound = ((RUNWAYS_SCHIPHOL_FAF[self.runway]['track']-180+ 360)%360) + (IAF_ANGLE/2)
-        ccw_bound = ((RUNWAYS_SCHIPHOL_FAF[self.runway]['track']-180+ 360)%360) - (IAF_ANGLE/2)
+        for rwy in self.runway:
+            num_points = 36 # number of straight line segments that make up the circle
 
-        angles = np.linspace(cw_bound,ccw_bound,num_points)
-        lat_iaf, lon_iaf = fn.get_point_at_distance(faf_lat, faf_lon, IAF_DISTANCE, angles)
+            faf_lat, faf_lon = fn.get_point_at_distance(RUNWAYS_SCHIPHOL_FAF[rwy]['lat'],
+                                                        RUNWAYS_SCHIPHOL_FAF[rwy]['lon'],
+                                                        FAF_DISTANCE,
+                                                        RUNWAYS_SCHIPHOL_FAF[rwy]['track']-180)
+            
+            # Compute bounds for the merge angles from FAF
+            cw_bound = ((RUNWAYS_SCHIPHOL_FAF[rwy]['track']-180+ 360)%360) + (IAF_ANGLE/2)
+            ccw_bound = ((RUNWAYS_SCHIPHOL_FAF[rwy]['track']-180+ 360)%360) - (IAF_ANGLE/2)
 
-        command = 'POLYLINE SINK'
-        for i in range(0,len(lat_iaf)):
-            command += ' '+str(lat_iaf[i])+' '
-            command += str(lon_iaf[i])
-        bs.stack.stack(command)
+            angles = np.linspace(cw_bound,ccw_bound,num_points)
+            lat_iaf, lon_iaf = fn.get_point_at_distance(faf_lat, faf_lon, IAF_DISTANCE, angles)
+
+            command = f'POLYLINE SINK{rwy}'
+            for i in range(0,len(lat_iaf)):
+                command += ' '+str(lat_iaf[i])+' '
+                command += str(lon_iaf[i])
+            bs.stack.stack(command)
     
-        bs.stack.stack(f'POLYLINE RESTRICT {lat_iaf[0]} {lon_iaf[0]} {faf_lat} {faf_lon} {lat_iaf[-1]} {lon_iaf[-1]}')
-        bs.stack.stack('COLOR RESTRICT red')
+            bs.stack.stack(f'POLYLINE RESTRICT{rwy} {lat_iaf[0]} {lon_iaf[0]} {faf_lat} {faf_lon} {lat_iaf[-1]} {lon_iaf[-1]}')
+            bs.stack.stack(f'COLOR RESTRICT{rwy} red')
 
-        if self.render_mode == 'human':
-            env_max_distance = np.sqrt((MAX_DISTANCE)**2 + (MAX_DISTANCE)**2) #km
-            lat_ref_point,lon_ref_point = bs.tools.geo.kwikpos(SCHIPHOL[0], SCHIPHOL[1], 315, env_max_distance/NM2KM)
-            self.screen_coords = [lat_ref_point,lon_ref_point]
-            coordinates = np.empty(2 * 36, dtype=np.float32)  # Create empty array
-            coordinates[0::2] = lat_iaf  # Fill array lat0,lon0,lat1,lon1....
-            coordinates[1::2] = lon_iaf
+            if self.render_mode == 'human':
+                env_max_distance = np.sqrt((MAX_DISTANCE)**2 + (MAX_DISTANCE)**2) #km
+                lat_ref_point,lon_ref_point = bs.tools.geo.kwikpos(SCHIPHOL[0], SCHIPHOL[1], 315, env_max_distance/NM2KM)
+                self.screen_coords = [lat_ref_point,lon_ref_point]
+                coordinates = np.empty(2 * 36, dtype=np.float32)  # Create empty array
+                coordinates[0::2] = lat_iaf  # Fill array lat0,lon0,lat1,lon1....
+                coordinates[1::2] = lon_iaf
 
-            line_arc = np.reshape(coordinates, (len(coordinates) // 2, 2))
-            line_restrict = np.array([[lat_iaf[0],lon_iaf[0]],[faf_lat, faf_lon],[lat_iaf[-1], lon_iaf[-1]]])
+                line_arc = np.reshape(coordinates, (len(coordinates) // 2, 2))
+                line_restrict = np.array([[lat_iaf[0],lon_iaf[0]],[faf_lat, faf_lon],[lat_iaf[-1], lon_iaf[-1]]])
 
-            # Convert all coordinates to Pygame window reference frame
-            qdr, dis = bs.tools.geo.kwikqdrdist(self.screen_coords[0], self.screen_coords[1], line_arc[:,0], line_arc[:,1])
-            dis = dis*NM2KM
-            x_arc = ((np.sin(np.deg2rad(qdr))*dis)/(MAX_DISTANCE*2))*self.window_width
-            y_arc = ((-np.cos(np.deg2rad(qdr))*dis)/(MAX_DISTANCE*2))*self.window_width
-            line_arc_pg = list(zip(x_arc, y_arc))
+                # Convert all coordinates to Pygame window reference frame
+                qdr, dis = bs.tools.geo.kwikqdrdist(self.screen_coords[0], self.screen_coords[1], line_arc[:,0], line_arc[:,1])
+                dis = dis*NM2KM
+                x_arc = ((np.sin(np.deg2rad(qdr))*dis)/(MAX_DISTANCE*2))*self.window_width
+                y_arc = ((-np.cos(np.deg2rad(qdr))*dis)/(MAX_DISTANCE*2))*self.window_width
+                line_arc_pg = list(zip(x_arc, y_arc))
 
-            self.line_arc_pg = [(float(x), float(y)) for x, y in line_arc_pg]
+                self.line_arc_pg.append([(float(x), float(y)) for x, y in line_arc_pg])
 
-            qdr, dis = bs.tools.geo.kwikqdrdist(self.screen_coords[0], self.screen_coords[1], line_restrict[:,0], line_restrict[:,1])
-            dis = dis*NM2KM
-            x_restrict = ((np.sin(np.deg2rad(qdr))*dis)/(MAX_DISTANCE*2))*self.window_width
-            y_restrict = ((-np.cos(np.deg2rad(qdr))*dis)/(MAX_DISTANCE*2))*self.window_width
-            line_restrict_pg = list(zip(x_restrict, y_restrict))
+                qdr, dis = bs.tools.geo.kwikqdrdist(self.screen_coords[0], self.screen_coords[1], line_restrict[:,0], line_restrict[:,1])
+                dis = dis*NM2KM
+                x_restrict = ((np.sin(np.deg2rad(qdr))*dis)/(MAX_DISTANCE*2))*self.window_width
+                y_restrict = ((-np.cos(np.deg2rad(qdr))*dis)/(MAX_DISTANCE*2))*self.window_width
+                line_restrict_pg = list(zip(x_restrict, y_restrict))
 
-            self.line_restrict_pg = [(float(x), float(y)) for x, y in line_restrict_pg]
+                self.line_restrict_pg.append([(float(x), float(y)) for x, y in line_restrict_pg])
 
     def _get_spawn(self):
         """
@@ -504,8 +508,9 @@ class PathPlanningEnv(gym.Env):
         surface = pygame.transform.scale(surface, (self.window_width, self.window_height))
 
         # Draw the FAF and IAF
-        pygame.draw.lines(surface, (0, 0, 0), False, self.line_arc_pg, 3)
-        pygame.draw.lines(surface, (255, 0, 0), False, self.line_restrict_pg, 2)
+        for line_arc, line_restrict in zip(self.line_arc_pg,self.line_restrict_pg):
+            pygame.draw.lines(surface, (0, 0, 0), False, line_arc, 3)
+            pygame.draw.lines(surface, (255, 0, 0), False, line_restrict, 2)
 
         ### PLOTTING OF THE AIRCRAFT AND WAYPOINTS ###
         ac_lat, ac_lon = bs.traf.lat[0], bs.traf.lon[0]
