@@ -1,51 +1,68 @@
-from bluesky_zoo import sector_cr_v0, merge_v0
+from bluesky_zoo import sector_cr_v0
 
-from sac.actor import FeedForwardActor
-from sac.critic_q  import FeedForward_Q
-from sac.replay_buffer import ReplayBuffer
-from sac.SAC import SAC
+from sac_cr_att.actor import MultiHeadAdditiveActorBasic
+from sac_cr_att.critic_q  import MultiHeadAdditiveCriticQv3Basic
+from sac_cr_att.replay_buffer import ReplayBuffer
+from sac_cr_att.SAC import SAC
+
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('agg')
 
 import numpy as np
 import torch
 
-def save_models(model, weights_folder = 'sac_merge/weights'):
+def plot_figures(self, model):
+        fig, ax = plt.subplots()
+        ax.plot(model.qf1_lossarr, label='qf1')
+        ax.plot(model.qf2_lossarr, label='qf2')
+        ax.set_yscale('log')
+        fig.savefig(self.output_folder+'/qloss.png')
+        plt.close(fig)
+
+def save_models(model, weights_folder = 'sac_cr_att/weights'):
     torch.save(model.actor.state_dict(), weights_folder+"/actor.pt")
     torch.save(model.critic_q.state_dict(), weights_folder+"/qf.pt")
     torch.save(model.critic_q_target.state_dict(), weights_folder+"/qf_target.pt")
 
 
-# env = sector_cr_v0.SectorCR(render_mode='human')
-env = merge_v0.MergeEnv(render_mode=None)
+env = sector_cr_v0.SectorCR_ATT(render_mode=None)
 
 action_dim = env.action_space('KL001').shape[0] 
 observation_dim = env.observation_space('KL001').shape[0]
 n_agents = env.num_ac 
 
-num_episodes = 1_000
+num_episodes = 100_000
+train_steps = 500 # first n transitions used for training, to control complexity of samples
+max_episode_length = 2500
 
 Buffer = ReplayBuffer(obs_dim = observation_dim,
                       action_dim = action_dim,
                       n_agents = n_agents,
-                      size = int(1e6))
+                      size = int(4e6),
+                      batch_size = 1024)
 
-Actor = FeedForwardActor(in_dim = observation_dim,
-                         out_dim = action_dim)
+Actor = MultiHeadAdditiveActorBasic(q_dim = 3,
+                                    kv_dim = 7,
+                                    out_dim = action_dim,
+                                    num_heads = 3)
 
-Critic_q = FeedForward_Q(state_dim = observation_dim,
-                         action_dim = action_dim)
+Critic_q = MultiHeadAdditiveCriticQv3Basic(q_dim = 5,
+                                        kv_dim = 7,
+                                        num_heads = 3)
 
-Critic_q_t = FeedForward_Q(state_dim = observation_dim,
-                         action_dim = action_dim)
-
+Critic_q_t = MultiHeadAdditiveCriticQv3Basic(q_dim = 5,
+                                        kv_dim = 7,
+                                        num_heads = 3)
 model = SAC(action_dim=action_dim,
             buffer = Buffer,
             actor = Actor,
             critic_q = Critic_q,
-            critic_q_target= Critic_q_t)
-
-# model.actor.load_state_dict(torch.load('sac/weights/actor.pt'))
+            critic_q_target= Critic_q_t,
+            gamma = 0.90)
 
 observations, infos = env.reset()
+
 agents = list(observations.keys())
 
 obs_array = np.array(list(observations.values()))
@@ -83,12 +100,13 @@ for episode in range(num_episodes):
         if list(dones.values())[0] or list(truncates.values())[0]:
             done = True
 
-        model.store_transition(obs_array,act_array,obs_array_n,rew_array,False)
-        # steps += 1
-        # if steps % 25 == 0:
-        #     print(steps)
-        #     input()
+        if steps < train_steps:
+            model.store_transition(obs_array,act_array,obs_array_n,rew_array,False)
+        
+        if steps > max_episode_length:
+             done = True
 
+        steps += 1
 
     total_rew = np.append(total_rew,rew)
     if episode % 10 == 0:

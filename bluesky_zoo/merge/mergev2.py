@@ -24,6 +24,7 @@ from pettingzoo import ParallelEnv
 import gymnasium as gym
 import numpy as np
 import pygame
+import random
 
 import bluesky as bs
 from bluesky_gym.envs.common.screen_dummy import ScreenDummy
@@ -45,6 +46,9 @@ FL2M = 30.48
 
 INTRUSION_DISTANCE = 5 # NM
 
+FAF_DISTANCE_MIN = 20
+FAF_DISTANCE_MAX = 500
+
 # Model parameters
 ACTION_FREQUENCY = 5
 NUM_AC_STATE = 3
@@ -53,8 +57,16 @@ INTRUSION_PENALTY = -1
 D_HEADING = 22.5 # deg
 D_VELOCITY = 20/3 # kts
 
+RWY_LAT = 52.36239301495972
+RWY_LON = 4.713195734579777
 
-class SectorCR(ParallelEnv):
+distance_faf_rwy = 200 # NM
+bearing_faf_rwy = 0
+FIX_LAT, FIX_LON = fn.get_point_at_distance(RWY_LAT, RWY_LON, distance_faf_rwy, bearing_faf_rwy)
+
+DISTANCE_MARGIN = 20 # km
+
+class MergeEnv(ParallelEnv):
     
     metadata = {
         "name": "sector_cr_v0",
@@ -94,20 +106,22 @@ class SectorCR(ParallelEnv):
         self.window = None
         self.clock = None
 
+        self.wpt_reach = {a: 0 for a in self.agents}
+        self.wpt_lat = FIX_LAT
+        self.wpt_lon = FIX_LON
+        self.rwy_lat = RWY_LAT
+        self.rwy_lon = RWY_LON
+
     def reset(self, seed=None, options=None):
         
         bs.traf.reset()
-        bs.tools.areafilter.deleteArea(self.poly_name)
         self.agents = self.possible_agents[:]
         self.num_episodes += 1
-        # if self.num_episodes > 1:
-        #     self.reward_array = np.append(self.reward_array, self.total_reward)
-        #     print(f'episode: {self.num_episodes}, avg rew: {self.reward_array[-100:].mean()}')
+
         self.total_reward = 0
         self.total_intrusions = 0
         self.average_drift = np.array([])
 
-        self._generate_polygon() # Create airspace polygon
         self._generate_waypoints() # Create waypoints for aircraft
         self._generate_ac()
 
@@ -198,7 +212,10 @@ class SectorCR(ParallelEnv):
             
             # Get and decompose agent aircaft drift
             wpts = fn.nm_to_latlong(CENTER, self.wpts[ac_idx])
-            wpt_qdr, _  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], wpts[0], wpts[1])
+            wpt_qdr, dist  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], wpts[0], wpts[1])
+
+            if dist < DISTANCE_MARGIN:
+                self.wpts[ac_idx] = [RWY_LAT, RWY_LON]
             drift = ac_hdg - wpt_qdr
             drift = fn.bound_angle_positive_negative_180(drift)
             cos_drift = np.cos(np.deg2rad(drift))
@@ -304,82 +321,26 @@ class SectorCR(ParallelEnv):
     def _get_agents(self, n_agents):
         return [f'kl00{i+1}'.upper() for i in range(n_agents)]
     
-    def _generate_polygon(self):
-        
-        R = np.sqrt(POLY_AREA_RANGE[1] / np.pi)
-        p = [fn.random_point_on_circle(R) for _ in range(3)] # 3 random points to start building the polygon
-        p = fn.sort_points_clockwise(p)
-        p_area = fn.polygon_area(p)
-        
-        while p_area < POLY_AREA_RANGE[0]:
-            p.append(fn.random_point_on_circle(R))
-            p = fn.sort_points_clockwise(p)
-            p_area = fn.polygon_area(p)
-        
-        self.poly_area = p_area
-        
-        self.poly_points = np.array(p) # Polygon vertices are saved in terms of NM
-        
-        p = [fn.nm_to_latlong(CENTER, point) for point in p] # Convert to lat/long coordinateS
-        
-        points = [coord for point in p for coord in point] # Flatten the list of points
-        bs.tools.areafilter.defineArea(self.poly_name, 'POLY', points)
-
     def _generate_waypoints(self):
         
-        edges = []
-        perim_tot = 0
-        
-        for i in range(len(self.poly_points)):
-            p1 = np.array(self.poly_points[i])
-            p2 = np.array(self.poly_points[(i+1) % len(self.poly_points)]) # Ensure wrap-around
-            len_edge = fn.euclidean_distance(p1, p2)
-            edges.append((p1, p2, len_edge))
-            perim_tot += len_edge
-        
-        d_list = [np.random.uniform(0, perim_tot) for _ in range(self.num_ac)] # Each ac including agent is given a waypoint
-        d_list.sort()
-        
+        # all aircraft start with the same target waypoint
         self.wpts = []
-        current_d = 0
-        
-        for d in d_list:
-            while d > current_d + edges[0][2]:
-                current_d += edges[0][2]
-                edges.pop(0)
-            
-            edge = edges[0]
-            frac = (d - current_d) / edge[2]
-            p = edge[0] + frac * (edge[1] - edge[0])
-            p = p*10
-            self.wpts.append(p)
+        for _ in range(self.num_ac):
+            self.wpts.append([self.wpt_lat,self.wpt_lon])
 
     def _generate_ac(self) -> None:
-        # Determine bounding box of airspace
-        min_x = min(self.poly_points[:, 0])
-        min_y = min(self.poly_points[:, 1])
-        max_x = max(self.poly_points[:, 0])
-        max_y = max(self.poly_points[:, 1])
-        
-        init_p_latlong = []
-        
-        while len(init_p_latlong) < self.num_ac:
-            p = np.array([np.random.uniform(min_x, max_x), np.random.uniform(min_y, max_y)])
-            p = fn.nm_to_latlong(CENTER, p)
-            if bs.tools.areafilter.checkInside(self.poly_name, np.array([p[0]]), np.array([p[1]]), np.array([ALTITUDE*FL2M])):
-                init_p_latlong.append(p)
-        
         for agent, idx in zip(self.agents,np.arange(self.num_ac)):
-            wpt_agent = fn.nm_to_latlong(CENTER, self.wpts[idx])
-            init_pos_agent = init_p_latlong[idx]
-            hdg_agent = fn.get_hdg(init_pos_agent, wpt_agent)
-            bs.traf.cre(agent, actype=AC_TYPE, aclat=init_pos_agent[0], aclon=init_pos_agent[1], achdg=hdg_agent, acspd=AC_SPD, acalt=ALTITUDE)
+            bearing_to_pos = random.uniform(-D_HEADING, D_HEADING) # heading radial towards FAF
+            distance_to_pos = random.uniform(FAF_DISTANCE_MIN,FAF_DISTANCE_MAX) # distance to faf 
+            lat_ac, lon_ac = fn.get_point_at_distance(self.wpt_lat, self.wpt_lon, distance_to_pos, bearing_to_pos)
+
+            bs.traf.cre(agent,actype="A320",acspd=AC_SPD,aclat=lat_ac,aclon=lon_ac,achdg=bearing_to_pos-180,acalt=10000)
 
     def _check_drift(self, ac_idx):
         ac_hdg = bs.traf.hdg[ac_idx]
         
         # Get and decompose agent aircaft drift
-        wpts = fn.nm_to_latlong(CENTER, self.wpts[ac_idx])
+        wpts = self.wpts[ac_idx]
         wpt_qdr, _  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], wpts[0], wpts[1])
         drift = ac_hdg - wpt_qdr
         drift = fn.bound_angle_positive_negative_180(drift)
@@ -554,83 +515,3 @@ class SectorCR(ParallelEnv):
         self.window.blit(canvas, canvas.get_rect())
         pygame.display.update()
         self.clock.tick(self.metadata["render_fps"])
-
-class SectorCR_ATT(SectorCR):
-
-    def __init__(self, render_mode=None, n_agents=10):
-        super().__init__(render_mode, n_agents)
-        self.observation_spaces = {agent: gym.spaces.Box(low=-np.inf, high=np.inf, shape=(7,), dtype=np.float64) for agent in self.agents}
-
-    def _get_observation(self):
-        obs = []
-
-        for agent in self.agents:
-            ac_idx = bs.traf.id2idx(agent)
-            ac_hdg = bs.traf.hdg[ac_idx]
-            
-            # Get and decompose agent aircaft drift
-            wpts = fn.nm_to_latlong(CENTER, self.wpts[ac_idx])
-            wpt_qdr, _  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], wpts[0], wpts[1])
-            drift = ac_hdg - wpt_qdr
-            drift = fn.bound_angle_positive_negative_180(drift)
-            cos_drift = np.cos(np.deg2rad(drift))
-            sin_drift = np.sin(np.deg2rad(drift))
-        
-            # Get agent aircraft airspeed, m/s
-            airspeed = bs.traf.tas[ac_idx]
-
-            vx = np.cos(np.deg2rad(ac_hdg)) * bs.traf.gs[ac_idx]
-            vy = np.sin(np.deg2rad(ac_hdg)) * bs.traf.gs[ac_idx]
-
-            ac_loc = fn.latlong_to_nm(CENTER, np.array([bs.traf.lat[ac_idx], bs.traf.lon[ac_idx]])) * NM2KM * 1000 # Two-step conversion lat/long -> NM -> m
-            x = ac_loc[0]
-            y = ac_loc[1]
-
-            observation = {
-                "cos(drift)": np.array([cos_drift]),
-                "sin(drift)": np.array([sin_drift]),
-                "airspeed": np.array([(airspeed-150)/50]),
-                "x": np.array([x/50000]),
-                "y": np.array([y/50000]),
-                "vx": np.array([vx/150]),
-                "vy": np.array([vy/150])
-            }
-
-            obs.append(np.concatenate(list(observation.values())))
-
-        observations = {
-            a: o
-            for a, o in zip(self.agents, obs)
-        }
-
-        return observations
-    
-    """
-    # TRANSFORMATION FOR THE ATTENTION EVENTUALLY
-
-    # Extract req. info from observation
-    positions = torch.tensor(obs_array[:,:,3:5])
-    velocities = torch.tensor(obs_array[:,:,5:7])
-    speed = torch.norm(velocities, dim=-1, keepdim=True) 
-    direction = velocities / (speed + 1e-8)
-
-    # Determine relative pos & vel from perspective of agent
-    relative_positions = positions.unsqueeze(1) - positions.unsqueeze(2)
-    relative_velocities = velocities.unsqueeze(1) - velocities.unsqueeze(2)
-
-    # Create rotation matrix
-    rot_x = direction
-    rot_y = torch.stack([-direction[..., 1], direction[..., 0]], dim=-1)
-    rotation_matrix = torch.stack([rot_x, rot_y], dim=-2)
-
-    # Apply the rotation
-    rel_pos_rotated = torch.matmul(rotation_matrix.unsqueeze(2), relative_positions.unsqueeze(-1)).squeeze(-1)
-    rel_vel_rotated = torch.matmul(rotation_matrix.unsqueeze(2), relative_velocities.unsqueeze(-1)).squeeze(-1)
-
-    # Removing Self-References
-    mask = ~torch.eye(t, dtype=bool).unsqueeze(0).repeat(b,1,1)
-    rel_pos_rotated = rel_pos_rotated[mask].reshape(b, t, t-1, 2)
-    rel_vel_rotated = rel_vel_rotated[mask].reshape(b, t, t-1, 2)
-    relative_states = torch.cat([rel_pos_rotated, rel_vel_rotated], dim=-1)
-
-    """
