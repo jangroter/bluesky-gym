@@ -55,8 +55,8 @@ ACTION_TIME = 120
 
 ACTION_FREQUENCY = int(ACTION_TIME / SIM_DT)
 
-
 DISTANCE_MARGIN = 4.5 # km
+
 
 class PathPlanningEnv(gym.Env):
     """ 
@@ -172,7 +172,7 @@ class PathPlanningEnv(gym.Env):
 
         if self.render_mode == "human":
             self._render_frame()
-
+        
         return observation, info
 
     def step(self, action):
@@ -201,8 +201,6 @@ class PathPlanningEnv(gym.Env):
             observation = self._get_obs()
             reward = self._get_reward()
             self.total_reward += reward
-            terminated = self._get_terminated()
-            truncated = self._get_truncated()
             info = self._get_info()
             return observation, reward, terminated, truncated, info
 
@@ -221,9 +219,8 @@ class PathPlanningEnv(gym.Env):
             observation = self._get_obs()
             reward = self._get_reward()
             self.total_reward += reward
-            terminated = self._get_terminated()
-            truncated = self._get_truncated()
             info = self._get_info()
+            
             return observation, reward, terminated, truncated, info
 
 
@@ -340,8 +337,8 @@ class PathPlanningEnv(gym.Env):
         Checks if the aircraft has passed the IAF beacon and can be routed to the FAF (SINK)
         or if it has missed approach by coming in with a too high turn radius requirements (RESTRICT)
         """
+        self.terminated = False
         for rwy in self.runway:
-            self.terminated = False
             shapes = bs.tools.areafilter.basic_shapes
             line_ac = Path(np.array([[self.lat, self.lon],[bs.traf.lat[0], bs.traf.lon[0]]]))
             line_sink = Path(np.reshape(shapes[f'SINK{rwy}'].coordinates, (len(shapes[f'SINK{rwy}'].coordinates) // 2, 2)))
@@ -354,6 +351,9 @@ class PathPlanningEnv(gym.Env):
             if line_restrict.intersects_path(line_ac):
                 self.segment_reward += -1
                 self.terminated = True
+        
+        self.lat = bs.traf.lat[0]
+        self.lon = bs.traf.lon[0]
 
         return self.terminated
 
