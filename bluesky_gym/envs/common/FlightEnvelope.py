@@ -53,3 +53,14 @@ def get_speed_at_altitude(alt, speed=None):
                 return tools.aero.vtas2cas(speednom*kts,alt)
             else:
                 return max(tools.aero.vtas2cas(speedmin*kts, alt), min(speed, tools.aero.vtas2cas(speedmax*kts,alt)))
+
+def get_limits_at_altitude(alt):
+    """
+    returns the speedlimits for a given altitude in m/s CAS
+
+    input: alt[m], speed[m/s, CAS]
+    output: speed_min, speed_max[m/s, CAS]
+    """
+    for altmin, altmax, speednom, speedmin, speedmax in speed_table:
+        if altmin*ft <= alt < altmax*ft:
+            return speedmin*kts, speedmax*kts
