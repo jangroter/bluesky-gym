@@ -5,7 +5,7 @@ from torch.distributions import Normal
 
 from typing import Tuple
 
-import sac_cr.transformer as transformer
+import sac_merge.transformer as transformer
 from abc import ABC, abstractmethod
 
 def init_layer_uniform(layer: nn.Linear, init_w: float = 3e-3) -> nn.Linear:

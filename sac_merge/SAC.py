@@ -5,9 +5,9 @@ import torch.optim as optim
 from typing import Tuple, Optional, List
 import numpy as np
 
-from sac_cr.actor import Actor
-from sac_cr.critic_q import Critic_Q
-from sac_cr.replay_buffer import ReplayBuffer
+from sac_merge.actor import Actor
+from sac_merge.critic_q import Critic_Q
+from sac_merge.replay_buffer import ReplayBuffer
 
 
 class SAC:

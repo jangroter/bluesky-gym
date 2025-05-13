@@ -31,7 +31,7 @@ from bluesky_gym.envs.common.screen_dummy import ScreenDummy
 import bluesky_gym.envs.common.functions as fn
 import random
 
-DISTANCE_MARGIN = 20 # km
+DISTANCE_MARGIN = 1 # km
 REACH_REWARD = 0#1
 
 # Model parameters
@@ -40,13 +40,13 @@ NUM_AC_STATE = 3
 DRIFT_PENALTY = -0.1
 INTRUSION_PENALTY = -1
 
-INTRUSION_DISTANCE = 5 # NM
+INTRUSION_DISTANCE = 2.5 # NM
 
-SPAWN_DISTANCE_MIN = 5 #km
+SPAWN_DISTANCE_MIN = 15 #km
 SPAWN_DISTANCE_MAX = 30 #km
 
-MERGE_ANGLE_MIN = 60
-MERGE_ANGLE_MAX = 60
+MERGE_ANGLE_MIN = 30
+MERGE_ANGLE_MAX = 30
 
 D_HEADING = 22.5 # deg
 D_VELOCITY = 20/3 # kts
@@ -144,7 +144,6 @@ class MergeEnv(ParallelEnv):
         return observations, infos
     
     def step(self, actions):
-        
         self._get_action(actions)
 
         for i in range(ACTION_FREQUENCY):
@@ -190,7 +189,10 @@ class MergeEnv(ParallelEnv):
         return [f'kl00{i+1}'.upper() for i in range(n_agents)]
     
     def _gen_aircraft(self):
-        self.merge_angle = np.random.randint(MERGE_ANGLE_MIN,MERGE_ANGLE_MAX)
+        if MERGE_ANGLE_MIN < MERGE_ANGLE_MAX:
+            self.merge_angle = np.random.randint(MERGE_ANGLE_MIN,MERGE_ANGLE_MAX)
+        else:
+            self.merge_angle = MERGE_ANGLE_MIN
         for agent, idx in zip(self.agents,np.arange(self.num_ac)):
             bearing_to_pos = random.uniform(-self.merge_angle, self.merge_angle) # heading radial towards FAF
             distance_to_pos = random.uniform(SPAWN_DISTANCE_MIN,SPAWN_DISTANCE_MAX) # distance to faf 
@@ -386,7 +388,7 @@ class MergeEnv(ParallelEnv):
         if self.clock is None and self.render_mode == "human":
             self.clock = pygame.time.Clock()
 
-        max_distance = 300 # width of screen in km
+        max_distance = 100 # width of screen in km
         px_per_km = self.window_width/max_distance
 
         canvas = pygame.Surface(self.window_size)
@@ -552,6 +554,97 @@ class MergeEnv_ATT(MergeEnv):
                 "cos(drift)": np.array([cos_drift]),
                 "sin(drift)": np.array([sin_drift]),
                 "airspeed": np.array([(airspeed-150)/50]),
+                "x": np.array([x/50000]),
+                "y": np.array([y/50000]),
+                "vx": np.array([vx/150]),
+                "vy": np.array([vy/150])
+            }
+
+            obs.append(np.concatenate(list(observation.values())))
+
+        observations = {
+            a: o
+            for a, o in zip(self.agents, obs)
+        }
+
+        return observations
+
+import bluesky_gym.envs.common.FlightEnvelope as fe
+class MergeEnv_ATT_alt(MergeEnv):
+
+    def __init__(self, render_mode=None, n_agents=5):
+        super().__init__(render_mode, n_agents)
+        self.observation_spaces = {agent: gym.spaces.Box(low=-np.inf, high=np.inf, shape=(12,), dtype=np.float64) for agent in self.agents}
+
+    def _get_action(self,actions):
+        for agent in self.agents:
+            action = actions[agent]
+            dh = action[0] * D_HEADING
+            dv = action[1] * D_VELOCITY
+            heading_new = fn.bound_angle_positive_negative_180(bs.traf.hdg[bs.traf.id2idx(agent)] + dh)
+            speed_new = (bs.traf.cas[bs.traf.id2idx(agent)] + dv) 
+
+            # limit speed based on altitude
+            altitude = bs.traf.alt[bs.traf.id2idx(agent)]
+            speed_new = fe.get_speed_at_altitude(altitude,speed_new) * MpS2Kt
+
+            # print(speed_new)
+            bs.stack.stack(f"HDG {agent} {heading_new}")
+            bs.stack.stack(f"SPD {agent} {speed_new}")
+
+    def _get_altitude_command(self,agent):
+        ac_idx = bs.traf.id2idx(agent)
+        if self.wpt_reach[agent] == 0: # pre-faf check
+            _, wpt_dist  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], self.wpt_lat, self.wpt_lon)
+            total_dist = (wpt_dist + distance_faf_rwy)
+        else: # post-faf check
+            _, wpt_dist  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], self.rwy_lat, self.rwy_lon)
+
+    def _get_observation(self):
+        obs = []
+        self.waypoint_dist = {a: 0 for a in self.agents}
+
+        for agent in self.agents:
+            ac_idx = bs.traf.id2idx(agent)
+            ac_hdg = bs.traf.hdg[ac_idx]
+            
+            # Get and decompose agent aircaft drift
+            if self.wpt_reach[agent] == 0: # pre-faf check
+                wpt_qdr, wpt_dist  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], self.wpt_lat, self.wpt_lon)
+            else: # post-faf check
+                wpt_qdr, wpt_dist  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], self.rwy_lat, self.rwy_lon)
+
+            drift = ac_hdg - wpt_qdr
+            drift = fn.bound_angle_positive_negative_180(drift)
+            cos_drift = np.cos(np.deg2rad(drift))
+            sin_drift = np.sin(np.deg2rad(drift))
+
+            self.waypoint_dist[agent] = wpt_dist
+
+            # Get agent aircraft airspeed, m/s
+            airspeed_cas = bs.traf.cas[ac_idx]
+            airspeed_gs = bs.traf.gs[ac_idx]
+
+            # Get speedlimit information
+            altitude = bs.traf.alt[ac_idx]
+            cas_min, cas_max = fe.get_limits_at_altitude(altitude)
+
+            vx = np.cos(np.deg2rad(ac_hdg)) * bs.traf.gs[ac_idx]
+            vy = np.sin(np.deg2rad(ac_hdg)) * bs.traf.gs[ac_idx]
+
+            ac_loc = fn.latlong_to_nm(CENTER, np.array([bs.traf.lat[ac_idx], bs.traf.lon[ac_idx]])) * NM2KM * 1000 # Two-step conversion lat/long -> NM -> m
+            x = ac_loc[0]
+            y = ac_loc[1]
+
+            observation = {
+                "cos(drift)": np.array([cos_drift]),
+                "sin(drift)": np.array([sin_drift]),
+                "airspeed_cas": np.array([(airspeed_cas-150)/50]),
+                "airspeed_gs": np.array([(airspeed_gs-150)/50]),
+                "altitude": np.array([(altitude-1500)/3000]),
+                "cas_min": np.array([(cas_min-150)/50]),
+                "cas_max": np.array([(cas_max-150)/50]),
+                "faf_dist": np.array([(wpt_dist-15)/20]),
                 "x": np.array([x/50000]),
                 "y": np.array([y/50000]),
                 "vx": np.array([vx/150]),

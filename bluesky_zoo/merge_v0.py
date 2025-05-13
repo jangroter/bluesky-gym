@@ -1,1 +1,1 @@
-from bluesky_zoo.merge.merge import MergeEnv, MergeEnv_ATT
+from bluesky_zoo.merge.merge import MergeEnv, MergeEnv_ATT, MergeEnv_ATT_alt
