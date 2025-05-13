@@ -570,6 +570,11 @@ class MergeEnv_ATT(MergeEnv):
         return observations
 
 import bluesky_gym.envs.common.FlightEnvelope as fe
+
+M2FEET = 3.2808
+GLIDE_SLOPE = 3 #degree
+ALT_PER_KM = (np.tan(np.radians(GLIDE_SLOPE))*1000)*M2FEET #feet
+
 class MergeEnv_ATT_alt(MergeEnv):
 
     def __init__(self, render_mode=None, n_agents=5):
@@ -592,13 +597,43 @@ class MergeEnv_ATT_alt(MergeEnv):
             bs.stack.stack(f"HDG {agent} {heading_new}")
             bs.stack.stack(f"SPD {agent} {speed_new}")
 
-    def _get_altitude_command(self,agent):
-        ac_idx = bs.traf.id2idx(agent)
-        if self.wpt_reach[agent] == 0: # pre-faf check
-            _, wpt_dist  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], self.wpt_lat, self.wpt_lon)
-            total_dist = (wpt_dist + distance_faf_rwy)
-        else: # post-faf check
-            _, wpt_dist  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], self.rwy_lat, self.rwy_lon)
+            req_altitude = self._get_altitude_command(agent)
+            
+            bs.stack.stack(f'ALT {agent} {req_altitude}')
+
+    def _get_altitude_command(self,agent,total_dist=None):
+        """
+        returns the altitude[feet] requirement for an aircraft 
+        input: total_dist[km]
+        """
+        if not total_dist:
+            ac_idx = bs.traf.id2idx(agent)
+            if self.wpt_reach[agent] == 0: # pre-faf check
+                _, wpt_dist  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], self.wpt_lat, self.wpt_lon)
+                total_dist = (wpt_dist + distance_faf_rwy) * NM2KM
+            else: # post-faf check
+                _, wpt_dist  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], self.rwy_lat, self.rwy_lon)
+                total_dist = NM2KM
+        
+        altitude = total_dist * ALT_PER_KM
+        return altitude
+
+    def _gen_aircraft(self):
+        if MERGE_ANGLE_MIN < MERGE_ANGLE_MAX:
+            self.merge_angle = np.random.randint(MERGE_ANGLE_MIN,MERGE_ANGLE_MAX)
+        else:
+            self.merge_angle = MERGE_ANGLE_MIN
+        for agent, idx in zip(self.agents,np.arange(self.num_ac)):
+            bearing_to_pos = random.uniform(-self.merge_angle, self.merge_angle) # heading radial towards FAF
+            distance_to_pos = random.uniform(SPAWN_DISTANCE_MIN,SPAWN_DISTANCE_MAX) # distance to faf 
+            lat_ac, lon_ac = fn.get_point_at_distance(self.wpt_lat, self.wpt_lon, distance_to_pos, bearing_to_pos)
+
+            altitude_req = self._get_altitude_command(agent, distance_to_pos + distance_faf_rwy * NM2KM) #feet
+            altitude_req = altitude_req / M2FEET
+
+            speed = fe.get_speed_at_altitude(altitude_req)
+
+            bs.traf.cre(agent,actype="A320",acspd=speed,aclat=lat_ac,aclon=lon_ac,achdg=bearing_to_pos-180,acalt=altitude_req)
 
     def _get_observation(self):
         obs = []
