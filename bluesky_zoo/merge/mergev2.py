@@ -302,7 +302,7 @@ class MergeEnv(ParallelEnv):
             dh = action[0] * D_HEADING
             dv = action[1] * D_VELOCITY
             heading_new = fn.bound_angle_positive_negative_180(bs.traf.hdg[bs.traf.id2idx(agent)] + dh)
-            speed_new = (bs.traf.tas[bs.traf.id2idx(agent)] + dv) * MpS2Kt
+            speed_new = (bs.traf.cas[bs.traf.id2idx(agent)] + dv) * MpS2Kt
 
             # print(speed_new)
             bs.stack.stack(f"HDG {agent} {heading_new}")
