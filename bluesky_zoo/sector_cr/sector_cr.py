@@ -577,7 +577,7 @@ class SectorCR_ATT(SectorCR):
             sin_drift = np.sin(np.deg2rad(drift))
         
             # Get agent aircraft airspeed, m/s
-            airspeed = bs.traf.tas[ac_idx]
+            airspeed = bs.traf.cas[ac_idx]
 
             vx = np.cos(np.deg2rad(ac_hdg)) * bs.traf.gs[ac_idx]
             vy = np.sin(np.deg2rad(ac_hdg)) * bs.traf.gs[ac_idx]
@@ -634,3 +634,105 @@ class SectorCR_ATT(SectorCR):
     relative_states = torch.cat([rel_pos_rotated, rel_vel_rotated], dim=-1)
 
     """
+
+import bluesky_gym.envs.common.FlightEnvelope as fe
+ALT_MIN = 3000 #m
+ALT_MAX = 10000 #m
+class SectorCR_ATT_alt(SectorCR):
+
+    def __init__(self, render_mode=None, n_agents=10):
+        super().__init__(render_mode, n_agents)
+        self.observation_spaces = {agent: gym.spaces.Box(low=-np.inf, high=np.inf, shape=(11,), dtype=np.float64) for agent in self.agents}
+
+    def _do_action(self, actions):
+        for agent in self.agents:
+            action = actions[agent]
+            dh = action[0] * D_HEADING
+            dv = action[1] * D_VELOCITY
+            heading_new = fn.bound_angle_positive_negative_180(bs.traf.hdg[bs.traf.id2idx(agent)] + dh)
+            speed_new = (bs.traf.cas[bs.traf.id2idx(agent)] + dv)
+
+            # limit speed based on altitude
+            altitude = bs.traf.alt[bs.traf.id2idx(agent)]
+            speed_new = fe.get_speed_at_altitude(altitude,speed_new) * MpS2Kt
+
+            # print(speed_new)
+            bs.stack.stack(f"HDG {agent} {heading_new}")
+            bs.stack.stack(f"SPD {agent} {speed_new}")
+
+    def _generate_ac(self) -> None:
+        # Determine bounding box of airspace
+        min_x = min(self.poly_points[:, 0])
+        min_y = min(self.poly_points[:, 1])
+        max_x = max(self.poly_points[:, 0])
+        max_y = max(self.poly_points[:, 1])
+        
+        init_p_latlong = []
+        
+        altitude_req = np.random.uniform(ALT_MIN,ALT_MAX)
+        speed = fe.get_speed_at_altitude(altitude_req)
+
+        while len(init_p_latlong) < self.num_ac:
+            p = np.array([np.random.uniform(min_x, max_x), np.random.uniform(min_y, max_y)])
+            p = fn.nm_to_latlong(CENTER, p)
+            if bs.tools.areafilter.checkInside(self.poly_name, np.array([p[0]]), np.array([p[1]]), np.array([ALTITUDE*FL2M])):
+                init_p_latlong.append(p)
+        
+        for agent, idx in zip(self.agents,np.arange(self.num_ac)):
+            wpt_agent = fn.nm_to_latlong(CENTER, self.wpts[idx])
+            init_pos_agent = init_p_latlong[idx]
+            hdg_agent = fn.get_hdg(init_pos_agent, wpt_agent)
+            bs.traf.cre(agent, actype=AC_TYPE, aclat=init_pos_agent[0], aclon=init_pos_agent[1], achdg=hdg_agent, acspd=speed, acalt=altitude_req)
+
+    def _get_observation(self):
+        obs = []
+
+        for agent in self.agents:
+            ac_idx = bs.traf.id2idx(agent)
+            ac_hdg = bs.traf.hdg[ac_idx]
+            
+            # Get and decompose agent aircaft drift
+            wpts = fn.nm_to_latlong(CENTER, self.wpts[ac_idx])
+            wpt_qdr, _  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], wpts[0], wpts[1])
+            drift = ac_hdg - wpt_qdr
+            drift = fn.bound_angle_positive_negative_180(drift)
+            cos_drift = np.cos(np.deg2rad(drift))
+            sin_drift = np.sin(np.deg2rad(drift))
+        
+            # Get agent aircraft airspeed, m/s
+            airspeed_cas = bs.traf.cas[ac_idx]
+            airspeed_gs = bs.traf.gs[ac_idx]
+
+            # Get speedlimit information
+            altitude = bs.traf.alt[ac_idx]
+            cas_min, cas_max = fe.get_limits_at_altitude(altitude)
+
+            vx = np.cos(np.deg2rad(ac_hdg)) * bs.traf.gs[ac_idx]
+            vy = np.sin(np.deg2rad(ac_hdg)) * bs.traf.gs[ac_idx]
+
+            ac_loc = fn.latlong_to_nm(CENTER, np.array([bs.traf.lat[ac_idx], bs.traf.lon[ac_idx]])) * NM2KM * 1000 # Two-step conversion lat/long -> NM -> m
+            x = ac_loc[0]
+            y = ac_loc[1]
+
+            observation = {
+                "cos(drift)": np.array([cos_drift]),
+                "sin(drift)": np.array([sin_drift]),
+                "airspeed_cas": np.array([(airspeed_cas-150)/50]),
+                "airspeed_gs": np.array([(airspeed_gs-150)/50]),
+                "altitude": np.array([(altitude-1500)/3000]),
+                "cas_min": np.array([(cas_min-150)/50]),
+                "cas_max": np.array([(cas_max-150)/50]),
+                "x": np.array([x/50000]),
+                "y": np.array([y/50000]),
+                "vx": np.array([vx/150]),
+                "vy": np.array([vy/150])
+            }
+
+            obs.append(np.concatenate(list(observation.values())))
+
+        observations = {
+            a: o
+            for a, o in zip(self.agents, obs)
+        }
+
+        return observations
