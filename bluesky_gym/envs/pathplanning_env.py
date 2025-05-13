@@ -37,8 +37,9 @@ RUNWAYS_SCHIPHOL_FAF = {
         "22":   {"lat": 52.300518, "lon": 4.783853, "track": 225}
     }
 
-FAF_DISTANCE = 10 #km
-IAF_DISTANCE = 15 #km, from FAF
+FAF_DISTANCE = 25 #km
+IAF_DISTANCE = 30 #km, from FAF
+
 IAF_ANGLE = 60 #degrees, symmetrical around FAF
 
 MIN_DISTANCE = FAF_DISTANCE + IAF_DISTANCE

@@ -42,11 +42,11 @@ INTRUSION_PENALTY = -1
 
 INTRUSION_DISTANCE = 5 # NM
 
-SPAWN_DISTANCE_MIN = 15
-SPAWN_DISTANCE_MAX = 200
+SPAWN_DISTANCE_MIN = 5 #km
+SPAWN_DISTANCE_MAX = 30 #km
 
-MERGE_ANGLE_MIN = 5
-MERGE_ANGLE_MAX = 45
+MERGE_ANGLE_MIN = 60
+MERGE_ANGLE_MAX = 60
 
 D_HEADING = 22.5 # deg
 D_VELOCITY = 20/3 # kts
@@ -63,11 +63,18 @@ MpS2Kt = 1.94384
 RWY_LAT = 52.36239301495972
 RWY_LON = 4.713195734579777
 
-distance_faf_rwy = 200 # NM
+distance_faf_rwy = 25 / NM2KM # NM
 bearing_faf_rwy = 0
 FIX_LAT, FIX_LON = fn.get_point_at_distance(RWY_LAT, RWY_LON, distance_faf_rwy, bearing_faf_rwy)
 
 CENTER = np.array([51.990426702297746, 4.376124857109851]) # TU Delft AE Faculty coordinates
+
+## TODO:
+# Implement altitudes and speed limits based on this:
+# add speed limits to the observation
+# alt @ FAF = 4250ft
+# alt @ Start = 9500ft
+
 
 class MergeEnv(ParallelEnv):
     metadata = {
