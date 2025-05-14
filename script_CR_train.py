@@ -1,4 +1,4 @@
-from bluesky_zoo import sector_cr_v0, merge_v0
+from bluesky_zoo import sector_cr_v0
 
 from sac_cr.actor import MultiHeadAdditiveActorBasic
 from sac_cr.critic_q  import MultiHeadAdditiveCriticQv3Basic
@@ -26,7 +26,7 @@ def save_models(model, weights_folder = 'sac_cr_att_per_large/weights'):
     torch.save(model.critic_q_target.state_dict(), weights_folder+"/qf_target.pt")
 
 # env = sector_cr_v0.SectorCR_ATT(render_mode=None)
-env = sector_cr_v0.SectorCR_ATT(render_mode=None)
+env = sector_cr_v0.SectorCR_ATT_alt(render_mode=None)
 
 action_dim = env.action_space('KL001').shape[0] 
 observation_dim = env.observation_space('KL001').shape[0]
@@ -42,17 +42,17 @@ Buffer = PrioritizedReplayBuffer(obs_dim = observation_dim,
                       size = int(4e6),
                       batch_size = 1024)
 
-Actor = MultiHeadAdditiveActorBasic(q_dim = 3,
+Actor = MultiHeadAdditiveActorBasic(q_dim = 7,
                                     kv_dim = 7,
                                     out_dim = action_dim,
                                     num_heads = 5,
                                     dropout_rate=0)
 
-Critic_q = MultiHeadAdditiveCriticQv3Basic(q_dim = 5,
+Critic_q = MultiHeadAdditiveCriticQv3Basic(q_dim = 9,
                                         kv_dim = 7,
                                         num_heads = 5,)
 
-Critic_q_t = MultiHeadAdditiveCriticQv3Basic(q_dim = 5,
+Critic_q_t = MultiHeadAdditiveCriticQv3Basic(q_dim = 9,
                                         kv_dim = 7,
                                         num_heads = 5)
 model = SAC(action_dim=action_dim,

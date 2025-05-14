@@ -1,1 +1,1 @@
-from bluesky_zoo.sector_cr.sector_cr import SectorCR, SectorCR_ATT
+from bluesky_zoo.sector_cr.sector_cr import SectorCR, SectorCR_ATT, SectorCR_ATT_alt
