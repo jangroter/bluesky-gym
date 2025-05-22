@@ -7,8 +7,8 @@ from typing import Tuple
 
 def query_key_from_state(state):
     # Extract req. info from observation
-    positions = torch.tensor(state[:,:,8:10])
-    velocities = torch.tensor(state[:,:,10:12])
+    positions = torch.tensor(state[:,:,9:11])
+    velocities = torch.tensor(state[:,:,11:13])
     speed = torch.norm(velocities, dim=-1, keepdim=True) 
     direction = velocities / (speed + 1e-8)
 
@@ -48,7 +48,7 @@ def query_key_from_state(state):
     track_error_selected = track_error_expanded[mask].reshape(b, t, t-1, 2)
     relative_states = torch.cat([relative_states, track_error_selected], dim=-1)
 
-    q_x = state[:,:,0:8]
+    q_x = state[:,:,0:9]
     kv_x = relative_states
 
     return q_x, kv_x

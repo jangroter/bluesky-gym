@@ -39,6 +39,7 @@ ACTION_FREQUENCY = 5
 NUM_AC_STATE = 3
 DRIFT_PENALTY = -0.01
 INTRUSION_PENALTY = -1
+OUT_OF_AREA_PENALTY = -0.3
 
 INTRUSION_DISTANCE = 2.5 # NM
 
@@ -305,8 +306,9 @@ class MergeEnv(ParallelEnv):
             reach_reward, done = self._check_waypoint(agent)
             drift_reward = self._check_drift(ac_idx, agent)
             intrusion_reward = self._check_intrusion(ac_idx)
+            out_of_area_reward = self._check_out_of_area(ac_idx,agent)
 
-            reward = reach_reward + drift_reward + intrusion_reward
+            reward = reach_reward + drift_reward + intrusion_reward + out_of_area_reward
 
             rew.append(reward)
             dones.append(done)
@@ -324,7 +326,16 @@ class MergeEnv(ParallelEnv):
         }
 
         return rewards, done
-        
+    
+    def _check_out_of_area(self, ac_idx, agent):
+        reward = 0
+        if self.wpt_reach[agent] != 1:
+            bearing_faf, _ = bs.tools.geo.kwikqdrdist(self.wpt_lat, self.wpt_lon, bs.traf.lat[ac_idx], bs.traf.lon[ac_idx])
+            bearing_faf = fn.bound_angle_positive_negative_180(bearing_faf)
+            if abs(bearing_faf) > MERGE_ANGLE_MAX:
+                reward += OUT_OF_AREA_PENALTY
+        return reward
+
     def _check_waypoint(self, agent):
         reward = 0
         index = 0
@@ -579,7 +590,7 @@ class MergeEnv_ATT_alt(MergeEnv):
 
     def __init__(self, render_mode=None, n_agents=5):
         super().__init__(render_mode, n_agents)
-        self.observation_spaces = {agent: gym.spaces.Box(low=-np.inf, high=np.inf, shape=(12,), dtype=np.float64) for agent in self.agents}
+        self.observation_spaces = {agent: gym.spaces.Box(low=-np.inf, high=np.inf, shape=(13,), dtype=np.float64) for agent in self.agents}
 
     def _get_action(self,actions):
         for agent in self.agents:
@@ -646,8 +657,13 @@ class MergeEnv_ATT_alt(MergeEnv):
             # Get and decompose agent aircaft drift
             if self.wpt_reach[agent] == 0: # pre-faf check
                 wpt_qdr, wpt_dist  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], self.wpt_lat, self.wpt_lon)
+
+                bearing_faf, _ = bs.tools.geo.kwikqdrdist(self.wpt_lat, self.wpt_lon, bs.traf.lat[ac_idx], bs.traf.lon[ac_idx])
+                bearing_faf = fn.bound_angle_positive_negative_180(bearing_faf)
             else: # post-faf check
                 wpt_qdr, wpt_dist  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], self.rwy_lat, self.rwy_lon)
+
+                bearing_faf = 0
 
             drift = ac_hdg - wpt_qdr
             drift = fn.bound_angle_positive_negative_180(drift)
@@ -680,6 +696,7 @@ class MergeEnv_ATT_alt(MergeEnv):
                 "cas_min": np.array([(cas_min-150)/50]),
                 "cas_max": np.array([(cas_max-150)/50]),
                 "faf_dist": np.array([(wpt_dist-15)/20]),
+                "bearing_faf": np.array([(bearing_faf)/30]),
                 "x": np.array([x/50000]),
                 "y": np.array([y/50000]),
                 "vx": np.array([vx/150]),
