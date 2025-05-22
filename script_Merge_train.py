@@ -42,17 +42,17 @@ Buffer = PrioritizedReplayBuffer(obs_dim = observation_dim,
                       size = int(4e6),
                       batch_size = 1024)
 
-Actor = MultiHeadAdditiveActorBasic(q_dim = 8,
+Actor = MultiHeadAdditiveActorBasic(q_dim = 9,
                                     kv_dim = 7,
                                     out_dim = action_dim,
                                     num_heads = 5,
                                     dropout_rate=0)
 
-Critic_q = MultiHeadAdditiveCriticQv3Basic(q_dim = 10,
+Critic_q = MultiHeadAdditiveCriticQv3Basic(q_dim = 11,
                                         kv_dim = 7,
                                         num_heads = 5,)
 
-Critic_q_t = MultiHeadAdditiveCriticQv3Basic(q_dim = 10,
+Critic_q_t = MultiHeadAdditiveCriticQv3Basic(q_dim = 11,
                                         kv_dim = 7,
                                         num_heads = 5)
 model = SAC(action_dim=action_dim,

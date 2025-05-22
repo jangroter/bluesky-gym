@@ -104,17 +104,19 @@ for episode in range(num_episodes):
         if list(dones.values())[0] or list(truncates.values())[0]:
             done = True
 
-        # if steps < train_steps:
-        #     model.store_transition(obs_array,act_array,obs_array_n,rew_array,False)
+        if steps < train_steps:
+            model.store_transition(obs_array,act_array,obs_array_n,rew_array,False)
         
         if steps > max_episode_length:
              done = True
 
         steps += 1
-
+    env.render_mode = None
     total_rew = np.append(total_rew,rew)
     if episode % 10 == 0:
         print(f'episode: {episode}, avg rew: {total_rew[-500:].mean()}')
+    if episode % 50 == 0:
+        env.render_mode = 'human'
         # save_models(model)
 
 

@@ -638,6 +638,7 @@ class SectorCR_ATT(SectorCR):
 import bluesky_gym.envs.common.FlightEnvelope as fe
 ALT_MIN = 3000 #m
 ALT_MAX = 10000 #m
+
 class SectorCR_ATT_alt(SectorCR):
 
     def __init__(self, render_mode=None, n_agents=10):
@@ -655,6 +656,7 @@ class SectorCR_ATT_alt(SectorCR):
             # limit speed based on altitude
             altitude = bs.traf.alt[bs.traf.id2idx(agent)]
             speed_new = fe.get_speed_at_altitude(altitude,speed_new) * MpS2Kt
+            speed_low, speed_high = fe.get_limits_at_altitude(altitude)
 
             # print(speed_new)
             bs.stack.stack(f"HDG {agent} {heading_new}")
