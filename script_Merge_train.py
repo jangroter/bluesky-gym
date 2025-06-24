@@ -27,6 +27,7 @@ def save_models(model, weights_folder = 'sac_merge/weights'):
 
 # env = sector_cr_v0.SectorCR_ATT(render_mode=None)
 env = merge_v0.MergeEnv_ATT_alt(render_mode=None)
+save_folder = 'sac_merge/weights_v1'
 
 action_dim = env.action_space('KL001').shape[0] 
 observation_dim = env.observation_space('KL001').shape[0]
@@ -80,7 +81,7 @@ obs_array_n = np.array(list(observations.values()))
 rew_array = np.array(list(rewards.values()))
 done = list(dones.values())[0]
 
-# model.store_transition(obs_array,act_array,obs_array_n,rew_array,done)
+max_rew = -1000
 
 total_rew = np.array([])
 
@@ -120,11 +121,11 @@ for episode in range(num_episodes):
     if episode % 50 == 0:
         env.render_mode = 'human'
         # save_models(model)
+    
+    if total_rew[-100:].mean() > max_rew:
+        max_rew = total_rew[-100:].mean()
+        save_models(model, weights_folder=save_folder)
 
 
 import code
 code.interact(local=locals())
-
-# create the numpy arrays:
-# obs_array = np.array(list(observations.values()))
-# would be nice to have this in a wrapper and just create an array environment

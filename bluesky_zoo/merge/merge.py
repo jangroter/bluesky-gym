@@ -624,7 +624,7 @@ class MergeEnv_ATT_alt(MergeEnv):
                 total_dist = (wpt_dist + distance_faf_rwy) * NM2KM
             else: # post-faf check
                 _, wpt_dist  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], self.rwy_lat, self.rwy_lon)
-                total_dist = NM2KM
+                total_dist = wpt_dist * NM2KM
         
         altitude = total_dist * ALT_PER_KM
         return altitude
