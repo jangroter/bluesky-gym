@@ -2,7 +2,6 @@ import numpy as np
 import pygame
 
 import bluesky as bs
-from bluesky_gym.envs.common.screen_dummy import ScreenDummy
 import bluesky_gym.envs.common.functions as fn
 
 import gymnasium as gym
@@ -65,8 +64,7 @@ class PlanWaypointEnv(gym.Env):
         if bs.sim is None:
             bs.init(mode='sim', detached=True)
 
-        # initialize dummy screen and set correct sim speed
-        bs.scr = ScreenDummy()
+        # set correct sim speed
         bs.stack.stack('DT 1;FF')
 
         # initialize values used for logging -> input in _get_info
