@@ -43,14 +43,14 @@ NM2KM = 1.852
 MpS2Kt = 1.94384
 FL2M = 30.48
 
-INTRUSION_DISTANCE = 5# NM
+INTRUSION_DISTANCE = 5.5# NM
 
 # Model parameters
 ACTION_FREQUENCY = 5
 NUM_AC_STATE = 3
 DRIFT_PENALTY = -0.1
 INTRUSION_PENALTY = -1
-D_HEADING = 5 #22.5 # deg
+D_HEADING = 22.5 #22.5 # deg
 D_VELOCITY = 20/3 # kts
 
 
@@ -636,7 +636,7 @@ class SectorCR_ATT(SectorCR):
     """
 
 import bluesky_gym.envs.common.FlightEnvelope as fe
-ALT_MIN = 3000 #m
+ALT_MIN = 1000 #m
 ALT_MAX = 10000 #m
 
 class SectorCR_ATT_alt(SectorCR):

@@ -41,7 +41,7 @@ DRIFT_PENALTY = -0.01
 INTRUSION_PENALTY = -1
 OUT_OF_AREA_PENALTY = -0.3
 
-INTRUSION_DISTANCE = 2.5 # NM
+INTRUSION_DISTANCE = 3.5 # NM
 
 SPAWN_DISTANCE_MIN = 15 #km
 SPAWN_DISTANCE_MAX = 30 #km
@@ -64,7 +64,7 @@ MpS2Kt = 1.94384
 RWY_LAT = 52.36239301495972
 RWY_LON = 4.713195734579777
 
-distance_faf_rwy = 25 / NM2KM # NM
+distance_faf_rwy = 50 / NM2KM # NM
 bearing_faf_rwy = 0
 FIX_LAT, FIX_LON = fn.get_point_at_distance(RWY_LAT, RWY_LON, distance_faf_rwy, bearing_faf_rwy)
 
@@ -711,3 +711,59 @@ class MergeEnv_ATT_alt(MergeEnv):
         }
 
         return observations
+    
+SPAWN_DISTANCE_MAX_V2 = 40
+class MergeEnv_v2(MergeEnv_ATT_alt):
+    def __init__(self, render_mode=None, n_agents=5):
+        super().__init__(render_mode, n_agents)
+    
+    def _check_drift(self, ac_idx, agent):
+        ac_hdg = bs.traf.hdg[ac_idx]
+            
+        # Get and decompose agent aircaft drift
+        if self.wpt_reach[agent] == 0: # pre-faf check
+            wpt_qdr, wpt_dist  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], self.wpt_lat, self.wpt_lon)
+        else: # post-faf check
+            wpt_qdr, wpt_dist  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], self.rwy_lat, self.rwy_lon)
+
+        drift = ac_hdg - wpt_qdr
+        drift = fn.bound_angle_positive_negative_180(drift)
+
+        drift = abs(np.deg2rad(drift))
+        self.average_drift = np.append(self.average_drift, drift)
+        if drift < 1.57:
+            return drift * DRIFT_PENALTY
+        else:
+            return drift * DRIFT_PENALTY * 20
+
+    def _gen_aircraft(self):
+        if MERGE_ANGLE_MIN < MERGE_ANGLE_MAX:
+            self.merge_angle = np.random.randint(MERGE_ANGLE_MIN,MERGE_ANGLE_MAX)
+        else:
+            self.merge_angle = MERGE_ANGLE_MIN
+
+        lats = [0]
+        lons = [0]
+        for agent, idx in zip(self.agents,np.arange(self.num_ac)):
+            create = True
+            counter = 0
+            while create:
+                bearing_to_pos = random.uniform(-self.merge_angle, self.merge_angle) # heading radial towards FAF
+                distance_to_pos = SPAWN_DISTANCE_MAX_V2 * np.sqrt(random.uniform(0,1)) # distance to faf 
+                lat_ac, lon_ac = fn.get_point_at_distance(self.wpt_lat, self.wpt_lon, distance_to_pos, bearing_to_pos)
+                counter += 1
+                create = False
+                for lat,lon in zip(lats,lons):
+                    dis = bs.tools.geo.kwikdist(lat,lon,lat_ac,lon_ac)
+                    if dis < INTRUSION_DISTANCE and counter < 10:
+                        create = True
+            
+            lats.append(lat_ac)
+            lons.append(lon_ac)
+
+            altitude_req = self._get_altitude_command(agent, distance_to_pos + distance_faf_rwy * NM2KM) #feet
+            altitude_req = altitude_req / M2FEET
+
+            speed = fe.get_speed_at_altitude(altitude_req)
+
+            bs.traf.cre(agent,actype="A320",acspd=speed,aclat=lat_ac,aclon=lon_ac,achdg=bearing_to_pos-180,acalt=altitude_req)

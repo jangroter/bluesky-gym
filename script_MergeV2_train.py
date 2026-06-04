@@ -1,9 +1,9 @@
-from bluesky_zoo import sector_cr_v0
+from bluesky_zoo import merge_v0
 
-from sac_cr.actor import MultiHeadAdditiveActorBasic
-from sac_cr.critic_q  import MultiHeadAdditiveCriticQv3Basic
-from sac_cr.replay_buffer import PrioritizedReplayBuffer
-from sac_cr.SAC import SAC
+from sac_merge.actor import MultiHeadAdditiveActorBasic
+from sac_merge.critic_q  import MultiHeadAdditiveCriticQv3Basic
+from sac_merge.replay_buffer import PrioritizedReplayBuffer
+from sac_merge.SAC import SAC
 
 import matplotlib.pyplot as plt
 import matplotlib
@@ -20,21 +20,20 @@ def plot_figures(self, model):
         fig.savefig(self.output_folder+'/qloss.png')
         plt.close(fig)
 
-def save_models(model, weights_folder = 'sac_cr_hrl/weights'):
+def save_models(model, weights_folder = 'sac_merge/weights'):
     torch.save(model.actor.state_dict(), weights_folder+"/actor.pt")
     torch.save(model.critic_q.state_dict(), weights_folder+"/qf.pt")
     torch.save(model.critic_q_target.state_dict(), weights_folder+"/qf_target.pt")
 
 # env = sector_cr_v0.SectorCR_ATT(render_mode=None)
-env = sector_cr_v0.SectorCR_ATT_alt(render_mode=None)
-save_folder = 'sac_cr_hrl/temp'
+env = merge_v0.MergeEnv_v2(render_mode=None)
+save_folder = 'sac_merge_v2/weights_2'
 
 action_dim = env.action_space('KL001').shape[0] 
 observation_dim = env.observation_space('KL001').shape[0]
 n_agents = env.num_ac 
 
 num_episodes = 100_000
-
 train_steps = 500 # first n transitions used for training, to control complexity of samples
 max_episode_length = 2500
 
@@ -42,20 +41,19 @@ Buffer = PrioritizedReplayBuffer(obs_dim = observation_dim,
                       action_dim = action_dim,
                       n_agents = n_agents,
                       size = int(4e6),
-                      batch_size = 1024,
-                      uniform_ratio=1.0)
+                      batch_size = 1024)
 
-Actor = MultiHeadAdditiveActorBasic(q_dim = 7,
+Actor = MultiHeadAdditiveActorBasic(q_dim = 9,
                                     kv_dim = 7,
                                     out_dim = action_dim,
                                     num_heads = 5,
                                     dropout_rate=0)
 
-Critic_q = MultiHeadAdditiveCriticQv3Basic(q_dim = 9,
+Critic_q = MultiHeadAdditiveCriticQv3Basic(q_dim = 11,
                                         kv_dim = 7,
                                         num_heads = 5,)
 
-Critic_q_t = MultiHeadAdditiveCriticQv3Basic(q_dim = 9,
+Critic_q_t = MultiHeadAdditiveCriticQv3Basic(q_dim = 11,
                                         kv_dim = 7,
                                         num_heads = 5)
 model = SAC(action_dim=action_dim,
@@ -65,7 +63,7 @@ model = SAC(action_dim=action_dim,
             critic_q_target= Critic_q_t,
             gamma = 0.95)
 
-# model.actor.load_state_dict(torch.load('sac_cr_att_per_large/weights copy 3/actor.pt'))
+# model.actor.load_state_dict(torch.load('sac_merge/weights/actor.pt'))
 # model.actor.set_test(True)
 
 observations, infos = env.reset()
@@ -115,7 +113,10 @@ for episode in range(num_episodes):
              done = True
 
         steps += 1
+
+    
     env.render_mode = None
+
     total_rew = np.append(total_rew,rew)
     if len(total_steps)==0:
          total_steps = np.append(total_steps,steps)
@@ -126,8 +127,11 @@ for episode in range(num_episodes):
         print(f'episode: {episode}, avg rew: {total_rew[-500:].mean()}')
         np.savetxt(f'{save_folder}/reward.csv', np.column_stack((total_rew,total_steps)), delimiter=",", header="reward,steps")
 
-    # if episode % 50 == 0:
-    #     env.render_mode = 'human'
+    if episode % 50 == 0:
+        env.render_mode = 'human'
+    
+    if episode % 1000 == 0:
+        save_models(model, weights_folder=f'{save_folder}/back_up/')
 
     if total_rew[-100:].mean() > max_rew:
         max_rew = total_rew[-100:].mean()
@@ -136,7 +140,3 @@ for episode in range(num_episodes):
 
 import code
 code.interact(local=locals())
-
-# create the numpy arrays:
-# obs_array = np.array(list(observations.values()))
-# would be nice to have this in a wrapper and just create an array environment

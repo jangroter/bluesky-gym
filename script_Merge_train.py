@@ -27,7 +27,7 @@ def save_models(model, weights_folder = 'sac_merge/weights'):
 
 # env = sector_cr_v0.SectorCR_ATT(render_mode=None)
 env = merge_v0.MergeEnv_ATT_alt(render_mode=None)
-save_folder = 'sac_merge/weights_v1'
+save_folder = 'sac_merge/weights'
 
 action_dim = env.action_space('KL001').shape[0] 
 observation_dim = env.observation_space('KL001').shape[0]
@@ -63,7 +63,7 @@ model = SAC(action_dim=action_dim,
             critic_q_target= Critic_q_t,
             gamma = 0.95)
 
-# model.actor.load_state_dict(torch.load('sac_cr_att_per_large/weights copy 3/actor.pt'))
+# model.actor.load_state_dict(torch.load('sac_merge/weights/actor.pt'))
 # model.actor.set_test(True)
 
 observations, infos = env.reset()
@@ -84,6 +84,7 @@ done = list(dones.values())[0]
 max_rew = -1000
 
 total_rew = np.array([])
+total_steps = np.array([])
 
 for episode in range(num_episodes):
     observations, infos = env.reset()
@@ -116,11 +117,17 @@ for episode in range(num_episodes):
     env.render_mode = None
 
     total_rew = np.append(total_rew,rew)
+    if len(total_steps)==0:
+         total_steps = np.append(total_steps,steps)
+    else:
+         total_steps = np.append(total_steps, total_steps[-1] + steps)
+
     if episode % 10 == 0:
         print(f'episode: {episode}, avg rew: {total_rew[-500:].mean()}')
+        np.savetxt(f'{save_folder}/reward.csv', np.column_stack((total_rew,total_steps)), delimiter=",", header="reward,steps")
+
     if episode % 50 == 0:
         env.render_mode = 'human'
-        # save_models(model)
     
     if total_rew[-100:].mean() > max_rew:
         max_rew = total_rew[-100:].mean()

@@ -9,3 +9,7 @@ dist/
 sac/weights/
 sac_cr_hrl/
 sac_merge/weights_v1/
+sac_merge/weights/
+sac_merge_v2/weights/
+sac_merge_v2/weights_2/
+merge_models/sac

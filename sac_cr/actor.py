@@ -48,19 +48,27 @@ class MultiHeadAdditiveActorBasic(Actor):
 
         self.layers = nn.ModuleList()
         in_dim = kv_dim * num_heads + q_dim
-        hidden_dims = [512,256,128]
+        # hidden_dims = [512,256,128]
+        # for hidden_dim in hidden_dims:
+        #     layer = nn.Linear(in_dim, hidden_dim)
+        #     nn.init.kaiming_normal_(layer.weight)
+            
+        #     self.layers.append(layer)
+        #     self.layers.append(nn.LayerNorm(hidden_dim))
+        #     self.layers.append(nn.SiLU())
+        #     self.layers.append(nn.Dropout(dropout_rate))
+            
+        #     in_dim = hidden_dim
+
+        hidden_dims = [256,256]
         for hidden_dim in hidden_dims:
             layer = nn.Linear(in_dim, hidden_dim)
             nn.init.kaiming_normal_(layer.weight)
             
             self.layers.append(layer)
-            self.layers.append(nn.LayerNorm(hidden_dim))
-            self.layers.append(nn.SiLU())
-            self.layers.append(nn.Dropout(dropout_rate))
+            self.layers.append(nn.ReLU())
             
             in_dim = hidden_dim
-
-
 
         log_std_layer = nn.Linear(in_dim, out_dim)
         self.log_std_layer = init_layer_uniform(log_std_layer)

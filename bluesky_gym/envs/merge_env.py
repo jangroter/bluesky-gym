@@ -10,38 +10,41 @@ from gymnasium import spaces
 
 import random
 
-DISTANCE_MARGIN = 10 # km
-REACH_REWARD = 1
+DISTANCE_MARGIN = 1 # km
+REACH_REWARD = 0#1
 
-DRIFT_PENALTY = -0.1
+DRIFT_PENALTY = -0.5
 INTRUSION_PENALTY = -1
 
-INTRUSION_DISTANCE = 4 # NM
+INTRUSION_DISTANCE = 3.5 # NM
 
-SPAWN_DISTANCE_MIN = 50
-SPAWN_DISTANCE_MAX = 200
+SPAWN_DISTANCE_MIN = 15 #km
+SPAWN_DISTANCE_MAX = 30 #km
 
-INTRUDER_DISTANCE_MIN = 20
-INTRUDER_DISTANCE_MAX = 500
+INTRUDER_DISTANCE_MIN = 5
+INTRUDER_DISTANCE_MAX = 45
 
-D_HEADING = 15
-D_SPEED = 20 
+MERGE_ANGLE_MIN = 30
+MERGE_ANGLE_MAX = 30
+
+D_HEADING = 22.5 # deg
+D_VELOCITY = 20/3 # kts
 
 AC_SPD = 100
 
 NM2KM = 1.852
 MpS2Kt = 1.94384
 
-ACTION_FREQUENCY = 10
+ACTION_FREQUENCY = 5
 
-NUM_AC = 20
-NUM_AC_STATE = 5
+NUM_AC = 4
+NUM_AC_STATE = 3
 NUM_WAYPOINTS = 1
 
 RWY_LAT = 52.36239301495972
 RWY_LON = 4.713195734579777
 
-distance_faf_rwy = 200 # NM
+distance_faf_rwy = 50 / NM2KM # NM
 bearing_faf_rwy = 0
 FIX_LAT, FIX_LON = fn.get_point_at_distance(RWY_LAT, RWY_LON, distance_faf_rwy, bearing_faf_rwy)
 
@@ -111,8 +114,13 @@ class MergeEnv(gym.Env):
         self.total_intrusions = 0
         self.faf_reached = 0
 
+        if MERGE_ANGLE_MIN < MERGE_ANGLE_MAX:
+            self.merge_angle = np.random.randint(MERGE_ANGLE_MIN,MERGE_ANGLE_MAX)
+        else:
+            self.merge_angle = MERGE_ANGLE_MIN
+
         # ownship spawn location
-        bearing_to_pos = random.uniform(-D_HEADING, D_HEADING) # heading radial towards FAF
+        bearing_to_pos = random.uniform(-self.merge_angle, self.merge_angle) # heading radial towards FAF
         distance_to_pos = random.uniform(SPAWN_DISTANCE_MIN,SPAWN_DISTANCE_MAX)  # distance to faf 
         rlat, rlon = fn.get_point_at_distance(FIX_LAT, FIX_LON, distance_to_pos, bearing_to_pos)
 
@@ -147,7 +155,7 @@ class MergeEnv(gym.Env):
     
     def _gen_aircraft(self):
         for i in range(NUM_AC-1):
-            bearing_to_pos = random.uniform(-D_HEADING, D_HEADING) # heading radial towards FAF
+            bearing_to_pos = random.uniform(-self.merge_angle, self.merge_angle) # heading radial towards FAF
             distance_to_pos = random.uniform(INTRUDER_DISTANCE_MIN,INTRUDER_DISTANCE_MAX) # distance to faf 
             lat_ac, lon_ac = fn.get_point_at_distance(self.wpt_lat, self.wpt_lon, distance_to_pos, bearing_to_pos)
 
@@ -285,7 +293,7 @@ class MergeEnv(gym.Env):
 
     def _get_action(self,action):
         dh = action[0] * D_HEADING
-        dv = action[1] * D_SPEED
+        dv = action[1] * D_VELOCITY
         heading_new = fn.bound_angle_positive_negative_180(bs.traf.hdg[bs.traf.id2idx('KL001')] + dh)
         speed_new = (bs.traf.cas[bs.traf.id2idx('KL001')] + dv) * MpS2Kt
 
@@ -301,8 +309,8 @@ class MergeEnv(gym.Env):
         if self.clock is None and self.render_mode == "human":
             self.clock = pygame.time.Clock()
 
-        max_distance = 500 # width of screen in km
-
+        max_distance = 100 # width of screen in km
+        px_per_km = self.window_width/max_distance
         canvas = pygame.Surface(self.window_size)
         canvas.fill((135,206,235)) 
 
@@ -337,10 +345,10 @@ class MergeEnv(gym.Env):
         )
 
         # heading boundary lines
-        he_x_l = ((np.cos(np.deg2rad(180+135)) * heading_length)/max_distance)*self.window_width
-        he_y_l = ((np.sin(np.deg2rad(180+135)) * heading_length)/max_distance)*self.window_width
-        he_x_r = ((np.cos(np.deg2rad(180-135)) * heading_length)/max_distance)*self.window_width
-        he_y_r = ((np.sin(np.deg2rad(180-135)) * heading_length)/max_distance)*self.window_width
+        he_x_l = ((np.cos(np.deg2rad(-self.merge_angle)) * heading_length)/max_distance)*self.window_width
+        he_y_l = ((np.sin(np.deg2rad(-self.merge_angle)) * heading_length)/max_distance)*self.window_width
+        he_x_r = ((np.cos(np.deg2rad(self.merge_angle)) * heading_length)/max_distance)*self.window_width
+        he_y_r = ((np.sin(np.deg2rad(self.merge_angle)) * heading_length)/max_distance)*self.window_width
         pygame.draw.line(canvas,
         (3,252,11),
         (circle_x,circle_y),
@@ -441,7 +449,7 @@ class MergeEnv(gym.Env):
                 canvas, 
                 color,
                 (x_pos,y_pos),
-                radius = (INTRUSION_DISTANCE*NM2KM/max_distance)*self.window_width,
+                radius = INTRUSION_DISTANCE*NM2KM*px_per_km,
                 width = 2
             )
 
