@@ -6,8 +6,9 @@ dependencies = [
     "pygame",
     "gymnasium",
     "stable-baselines3",
-    "numpy",
+    "numpy < 2.4.0",
     "bluesky-simulator>=1.0.7",
+    "pyqt6>=6.11.0",
 ]
 
 authors = [
@@ -47,7 +48,11 @@ build-backend = "hatchling.build"
 [tool.hatch.version]
 source = "vcs"
 
+[tool.hatch.build.targets.wheel]
+packages = ["bluesky_gym", "core"]
+
 [tool.hatch.build.targets.sdist]
 include = [
   "bluesky_gym/*",
+  "core/*",
 ]
