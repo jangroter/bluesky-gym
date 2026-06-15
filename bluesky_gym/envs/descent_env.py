@@ -6,13 +6,7 @@ import bluesky as bs
 import gymnasium as gym
 from gymnasium import spaces
 
-# Define constants
-ALT_MEAN = 1500
-ALT_STD = 3000
-VZ_MEAN = 0
-VZ_STD = 5
-RWY_DIS_MEAN = 100
-RWY_DIS_STD = 200
+from core.observations import OwnAltitudeObservation, TargetAltitudeObservation, RunwayDistanceObservation
 
 ACTION_2_MS = 12.5
 
@@ -49,14 +43,17 @@ class DescentEnv(gym.Env):
         self.window_height = 256
         self.window_size = (self.window_width, self.window_height) # Size of the rendered environment
 
-        self.observation_space = spaces.Dict(
-            {
-                "altitude": spaces.Box(-np.inf, np.inf, dtype=np.float64),
-                "vz": spaces.Box(-np.inf, np.inf, dtype=np.float64),
-                "target_altitude": spaces.Box(-np.inf, np.inf, dtype=np.float64),
-                "runway_distance": spaces.Box(-np.inf, np.inf, dtype=np.float64)
-            }
-        )
+        self.alt_obs = OwnAltitudeObservation()
+        self.target_alt_obs = TargetAltitudeObservation()
+        self.runway_obs = RunwayDistanceObservation(rwy_lat=52, rwy_lon=4)
+
+        self.observation_space = spaces.Dict({
+            **self.alt_obs.space(),
+            **self.target_alt_obs.space(),
+            **self.runway_obs.space(),
+        })
+
+        self.agent = "KL001"
        
         self.action_space = spaces.Box(-1, 1, shape=(1,), dtype=np.float64)
 
@@ -86,34 +83,11 @@ class DescentEnv(gym.Env):
 
 
     def _get_obs(self):
-        """
-        Observation consists of altitude, vertical speed, target altitude and distance to runway
-        Very crude normalization in place for now
-        """
-
-        DEFAULT_RWY_DIS = 200 
-        RWY_LAT = 52
-        RWY_LON = 4
-        NM2KM = 1.852
-
-        self.altitude = bs.traf.alt[0]
-        self.vz = bs.traf.vs[0]
-        self.runway_distance = (DEFAULT_RWY_DIS - bs.tools.geo.kwikdist(RWY_LAT,RWY_LON,bs.traf.lat[0],bs.traf.lon[0])*NM2KM)
-
-        # very crude normalization
-        obs_altitude = np.array([(self.altitude - ALT_MEAN)/ALT_STD])
-        obs_vz = np.array([(self.vz - VZ_MEAN) / VZ_STD])
-        obs_target_alt = np.array([((self.target_alt- ALT_MEAN)/ALT_STD)])
-        obs_runway_distance = np.array([(self.runway_distance - RWY_DIS_MEAN)/RWY_DIS_STD])
-
-        observation = {
-                "altitude": obs_altitude,
-                "vz": obs_vz,
-                "target_altitude": obs_target_alt,
-                "runway_distance": obs_runway_distance,
-            }
-        
-        return observation
+        return {
+            **self.alt_obs.observe(self.agent),
+            **self.target_alt_obs.observe(self.target_alt),
+            **self.runway_obs.observe(self.agent),
+        }
     
     def _get_info(self):
         # Here you implement any additional info that you want to return after a step,
@@ -125,7 +99,10 @@ class DescentEnv(gym.Env):
         }
     
     def _get_reward(self):
-
+        self.altitude = bs.traf.alt[0]
+        self.runway_distance = (
+            200 - bs.tools.geo.kwikdist(52, 4, bs.traf.lat[0], bs.traf.lon[0]) * 1.852
+        )
         # reward part of the function
         if self.runway_distance > 0 and self.altitude > 0:
             reward = abs(self.target_alt - self.altitude) * ALT_DIF_REWARD_SCALE
@@ -182,7 +159,7 @@ class DescentEnv(gym.Env):
     
     def step(self, action):
         
-        self._get_action(action)
+        self._get_action(action[0])
 
         action_frequency = ACTION_FREQUENCY
         for i in range(action_frequency):
@@ -208,6 +185,10 @@ class DescentEnv(gym.Env):
         pass
 
     def _render_frame(self):
+        self.altitude = bs.traf.alt[0]
+        self.runway_distance = (
+            200 - bs.tools.geo.kwikdist(52, 4, bs.traf.lat[0], bs.traf.lon[0]) * 1.852
+        )
         if self.window is None and self.render_mode == "human":
             pygame.init()
             pygame.display.init()
