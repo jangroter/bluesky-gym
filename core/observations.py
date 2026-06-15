@@ -81,7 +81,8 @@ class DriftObservation:
             "sin_drift": spaces.Box(-1.0, 1.0, shape=(1,), dtype=np.float64),
         }
 
-    def observe(self, ac_idx, target_hdg):
+    def observe(self, ac_id, target_hdg):
+        ac_idx = bs.traf.id2idx(ac_id)
         drift_rad = np.deg2rad(_bound_angle(bs.traf.hdg[ac_idx] - target_hdg))
         return {
             "cos_drift": np.array([np.cos(drift_rad)]),
@@ -139,7 +140,9 @@ class WaypointObservation:
             space["waypoint_status"] = spaces.Box(0, 1.0, shape=shape, dtype=np.float64),
         return space
 
-    def observe(self, ac_idx, wpt_lats, wpt_lons, reached_flags=None):
+    def observe(self, ac_id, wpt_lats, wpt_lons, reached_flags=None):
+        ac_idx = bs.traf.id2idx(ac_id)
+
         own_lat = bs.traf.lat[ac_idx]
         own_lon = bs.traf.lon[ac_idx]
         own_hdg = bs.traf.hdg[ac_idx]
@@ -231,7 +234,9 @@ class IntruderObservation:
             s["vz_difference"] = spaces.Box(-np.inf, np.inf, shape=shape, dtype=np.float64)
         return s
 
-    def observe(self, ac_idx):
+    def observe(self, ac_id):
+        ac_idx = bs.traf.id2idx(ac_id)
+
         own_lat = bs.traf.lat[ac_idx]
         own_lon = bs.traf.lon[ac_idx]
         own_hdg = bs.traf.hdg[ac_idx]
@@ -306,7 +311,8 @@ class OwnAirspeedObservation:
     def space(self):
         return {"airspeed": spaces.Box(-np.inf, np.inf, shape=(1,), dtype=np.float64)}
 
-    def observe(self, ac_idx):
+    def observe(self, ac_id):
+        ac_idx = bs.traf.id2idx(ac_id)
         return {"airspeed": np.array([(bs.traf.tas[ac_idx] - self.spd_mean) / self.spd_std])}
 
 class OwnAltitudeObservation:
@@ -333,7 +339,8 @@ class OwnAltitudeObservation:
             "vz": spaces.Box(-np.inf, np.inf, shape=(1,), dtype=np.float64),
         }
 
-    def observe(self, ac_idx):
+    def observe(self, ac_id):
+        ac_idx = bs.traf.id2idx(ac_id)
         return {
             "altitude": np.array([(bs.traf.alt[ac_idx] - self.alt_mean) / self.alt_std]),
             "vz": np.array([(bs.traf.vs[ac_idx] - self.vz_mean) / self.vz_std]),
@@ -389,7 +396,8 @@ class RunwayDistanceObservation:
     def space(self):
         return {"runway_distance": spaces.Box(-np.inf, np.inf, shape=(1,), dtype=np.float64)}
 
-    def observe(self, ac_idx):
+    def observe(self, ac_id):
+        ac_idx = bs.traf.id2idx(ac_id)
         dist_km = bs.tools.geo.kwikdist(
             self.rwy_lat, self.rwy_lon,
             bs.traf.lat[ac_idx], bs.traf.lon[ac_idx],
@@ -442,7 +450,9 @@ class ObstacleObservation:
             "obstacle_radius": spaces.Box(0.0, np.inf, shape=shape, dtype=np.float64),
         }
 
-    def observe(self, ac_idx, obstacle_lats, obstacle_lons, obstacle_radii):
+    def observe(self, ac_id, obstacle_lats, obstacle_lons, obstacle_radii):
+        ac_idx = bs.traf.id2idx(ac_id)
+        
         own_lat = bs.traf.lat[ac_idx]
         own_lon = bs.traf.lon[ac_idx]
         own_hdg = bs.traf.hdg[ac_idx]
