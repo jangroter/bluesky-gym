@@ -49,7 +49,7 @@ def _sort_by_distance(ac_idx, other_idx):
         bs.traf.lat[ac_idx], bs.traf.lon[ac_idx],
         bs.traf.lat[other_idx], bs.traf.lon[other_idx],
     )
-    return [other_idx[i] for i in np.argsort(dists)]
+    return [other_idx[int(i)] for i in np.argsort(np.asarray(dists).flatten())]
 
 def _sort_by_tcpa(ac_idx, other_idx):
     tcpa_vals = [_cpa(ac_idx, i)[0] for i in other_idx]
@@ -64,7 +64,7 @@ def _sort_points_by_distance(own_lat, own_lon, point_lats, point_lons):
     if not len(point_lats):
         return []
     dists = bs.tools.geo.kwikdist_matrix(own_lat, own_lon, point_lats, point_lons)
-    return list(np.argsort(dists))
+    return [int(i) for i in np.argsort(np.asarray(dists).flatten())]
 
 class DriftObservation:
     """
@@ -136,11 +136,13 @@ class WaypointObservation:
             "sin_drift": spaces.Box(-1.0, 1.0, shape=shape, dtype=np.float64),
             "waypoint_distance": spaces.Box(-np.inf, np.inf, shape=shape, dtype=np.float64),
         }
-        if self.status:
-            space["waypoint_status"] = spaces.Box(0, 1.0, shape=shape, dtype=np.float64),
+        if self.include_status:
+            space["waypoint_status"] = spaces.Box(0, 1.0, shape=shape, dtype=np.float64)
         return space
 
     def observe(self, ac_id, wpt_lats, wpt_lons, reached_flags=None):
+        if self.include_status and reached_flags is None:
+            raise ValueError("include_status=True requires reached_flags")
         ac_idx = bs.traf.id2idx(ac_id)
 
         own_lat = bs.traf.lat[ac_idx]
@@ -168,8 +170,8 @@ class WaypointObservation:
             "sin_drift": sin_drift,
             "waypoint_distance": distances / self.distance_norm,
         }
-        if self.status and reached_flags is not None:
-            obs["reached"] = reached
+        if self.include_status:
+            obs["waypoint_status"] = reached
         return obs
 
 class IntruderObservation:
@@ -452,7 +454,7 @@ class ObstacleObservation:
 
     def observe(self, ac_id, obstacle_lats, obstacle_lons, obstacle_radii):
         ac_idx = bs.traf.id2idx(ac_id)
-        
+
         own_lat = bs.traf.lat[ac_idx]
         own_lon = bs.traf.lon[ac_idx]
         own_hdg = bs.traf.hdg[ac_idx]
