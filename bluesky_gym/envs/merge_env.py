@@ -1,3 +1,5 @@
+# TODO: change faf_reached to standardized waypoint reached approach (building on waypoint observation functionality)
+
 import numpy as np
 import pygame
 
@@ -8,6 +10,8 @@ import gymnasium as gym
 from gymnasium import spaces
 
 import random
+
+from core.observations import DriftObservation, OwnAirspeedObservation, WaypointObservation, IntruderObservation
 
 DISTANCE_MARGIN = 10 # km
 REACH_REWARD = 1
@@ -55,22 +59,21 @@ class MergeEnv(gym.Env):
         self.window_height = 500
         self.window_size = (self.window_width, self.window_height) # Size of the rendered environment
 
-        self.observation_space = spaces.Dict(
-            {
-                "cos(drift)": spaces.Box(-1, 1, shape=(1,), dtype=np.float64),
-                "sin(drift)": spaces.Box(-1, 1, shape=(1,), dtype=np.float64),
-                "airspeed": spaces.Box(-np.inf, np.inf, shape=(1,), dtype=np.float64),
-                "waypoint_dist": spaces.Box(-np.inf, np.inf, shape=(1,), dtype=np.float64),
-                "faf_reached": spaces.Box(0, 1, shape=(1,), dtype=np.float64),
-                "x_r": spaces.Box(-np.inf, np.inf, shape=(NUM_AC_STATE,), dtype=np.float64),
-                "y_r": spaces.Box(-np.inf, np.inf, shape=(NUM_AC_STATE,), dtype=np.float64),
-                "vx_r": spaces.Box(-np.inf, np.inf, shape=(NUM_AC_STATE,), dtype=np.float64),
-                "vy_r": spaces.Box(-np.inf, np.inf, shape=(NUM_AC_STATE,), dtype=np.float64),
-                "cos(track)": spaces.Box(-np.inf, np.inf, shape=(NUM_AC_STATE,), dtype=np.float64),
-                "sin(track)": spaces.Box(-np.inf, np.inf, shape=(NUM_AC_STATE,), dtype=np.float64),
-                "distances": spaces.Box(-np.inf, np.inf, shape=(NUM_AC_STATE,), dtype=np.float64)
-            }
-        )
+        self.drift_obs = DriftObservation()
+        self.airspeed_obs = OwnAirspeedObservation(spd_mean=0.0, spd_std=1.0)
+        self.waypoint_obs = WaypointObservation(n=1, distance_norm=250 * NM2KM)
+        self.intruder_obs = IntruderObservation(n=NUM_AC_STATE, sort_by="distance",
+                                                  pos_norm=1_000_000, spd_norm=150, dist_norm=250)
+
+        self.observation_space = spaces.Dict({
+            **self.drift_obs.space(),
+            **self.airspeed_obs.space(),
+            **self.waypoint_obs.space(),
+            "faf_reached": spaces.Box(0, 1, shape=(1,), dtype=np.float64),
+            **self.intruder_obs.space(),
+        })
+
+        self.agent = "KL001"
        
         self.action_space = spaces.Box(-1, 1, shape=(2,), dtype=np.float64)
 
@@ -115,7 +118,7 @@ class MergeEnv(gym.Env):
         distance_to_pos = random.uniform(SPAWN_DISTANCE_MIN,SPAWN_DISTANCE_MAX)  # distance to faf 
         rlat, rlon = fn.get_point_at_distance(FIX_LAT, FIX_LON, distance_to_pos, bearing_to_pos)
 
-        bs.traf.cre('KL001',actype="A320",acspd=AC_SPD, aclat= rlat, aclon= rlon, achdg=bearing_to_pos-180,acalt=10000)
+        bs.traf.cre(self.agent,actype="A320",acspd=AC_SPD, aclat= rlat, aclon= rlon, achdg=bearing_to_pos-180,acalt=10000)
 
         # generate other aircraft
         self._gen_aircraft()
@@ -157,82 +160,26 @@ class MergeEnv(gym.Env):
         return
 
     def _get_obs(self):
+        ac_idx = bs.traf.id2idx(self.agent)
 
-        ac_idx = 0
+        # target switches from the merge fix to the runway once the fix is reached
+        if self.wpt_reach == 0:
+            target_lat, target_lon = self.wpt_lat, self.wpt_lon
+        else:
+            target_lat, target_lon = self.rwy_lat, self.rwy_lon
 
-        self.cos_drift = np.array([])
-        self.sin_drift = np.array([])
-        self.airspeed = np.array([])
-        self.x_r = np.array([])
-        self.y_r = np.array([])
-        self.vx_r = np.array([])
-        self.vy_r = np.array([])
-        self.cos_track = np.array([])
-        self.sin_track = np.array([])
-        self.distances = np.array([])
-
-        ac_hdg = bs.traf.hdg[ac_idx]
-        
-        # Get and decompose agent aircaft drift
-        if self.wpt_reach == 0: # pre-faf check
-            wpt_qdr, wpt_dist  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], self.wpt_lat, self.wpt_lon)
-        else: # post-faf check
-            wpt_qdr, wpt_dist  = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], self.rwy_lat, self.rwy_lon)
-
-        drift = ac_hdg - wpt_qdr
-        drift = fn.bound_angle_positive_negative_180(drift)
-        self.drift = drift
-        self.cos_drift = np.append(self.cos_drift, np.cos(np.deg2rad(drift)))
-        self.sin_drift = np.append(self.sin_drift, np.sin(np.deg2rad(drift)))
-
+        # raw waypoint values retained for _check_waypoint, _check_drift (approach C)
+        wpt_qdr, wpt_dist = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], target_lat, target_lon)
         self.waypoint_dist = wpt_dist
+        self.drift = fn.bound_angle_positive_negative_180(bs.traf.hdg[ac_idx] - wpt_qdr)
 
-        self.airspeed = np.append(self.airspeed, bs.traf.tas[ac_idx])
-        vx = np.cos(np.deg2rad(ac_hdg)) * bs.traf.tas[ac_idx]
-        vy = np.sin(np.deg2rad(ac_hdg)) * bs.traf.tas[ac_idx]
-        
-        distances = bs.tools.geo.kwikdist_matrix(bs.traf.lat[0], bs.traf.lon[0], bs.traf.lat[1:],bs.traf.lon[1:])
-        ac_idx_by_dist = np.argsort(distances) # sort aircraft by distance to ownship
-
-        for i in range(NUM_AC-1):
-            ac_idx = ac_idx_by_dist[i]+1
-            int_hdg = bs.traf.hdg[ac_idx]
-            
-            # Intruder AC relative position, m
-            brg, dist = bs.tools.geo.kwikqdrdist(bs.traf.lat[0], bs.traf.lon[0], bs.traf.lat[ac_idx],bs.traf.lon[ac_idx]) 
-            self.x_r = np.append(self.x_r, (dist * NM2KM * 1000) * np.cos(np.deg2rad(brg)))
-            self.y_r = np.append(self.y_r, (dist * NM2KM * 1000) * np.sin(np.deg2rad(brg)))
-            
-            # Intruder AC relative velocity, m/s
-            vx_int = np.cos(np.deg2rad(int_hdg)) * bs.traf.tas[ac_idx]
-            vy_int = np.sin(np.deg2rad(int_hdg)) * bs.traf.tas[ac_idx]
-            self.vx_r = np.append(self.vx_r, vx_int - vx)
-            self.vy_r = np.append(self.vy_r, vy_int - vy)
-
-            # Intruder AC relative track, rad
-            track = np.arctan2(vy_int - vy, vx_int - vx)
-            self.cos_track = np.append(self.cos_track, np.cos(track))
-            self.sin_track = np.append(self.sin_track, np.sin(track))
-
-            self.distances = np.append(self.distances, distances[ac_idx-1])
-
-        # very crude normalization for the observation vectors
-        observation = {
-            "cos(drift)": np.array(self.cos_drift),
-            "sin(drift)": np.array(self.sin_drift),
-            "airspeed": np.array(self.airspeed),
-            "waypoint_dist": np.array([self.waypoint_dist/250]),
+        return {
+            **self.drift_obs.observe(self.agent, wpt_qdr),
+            **self.airspeed_obs.observe(self.agent),
+            **self.waypoint_obs.observe(self.agent, [target_lat], [target_lon]),
             "faf_reached": np.array([self.wpt_reach]),
-            "x_r": np.array(self.x_r[:NUM_AC_STATE]/1000000),
-            "y_r": np.array(self.y_r[:NUM_AC_STATE]/1000000),
-            "vx_r": np.array(self.vx_r[:NUM_AC_STATE]/150),
-            "vy_r": np.array(self.vy_r[:NUM_AC_STATE]/150),
-            "cos(track)": np.array(self.cos_track[:NUM_AC_STATE]),
-            "sin(track)": np.array(self.sin_track[:NUM_AC_STATE]),
-            "distances": np.array(self.distances[:NUM_AC_STATE]/250)
+            **self.intruder_obs.observe(self.agent),
         }
-
-        return observation
     
     def _get_info(self):
         return {
