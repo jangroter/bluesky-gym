@@ -7,6 +7,8 @@ import bluesky_gym.envs.common.functions as fn
 import gymnasium as gym
 from gymnasium import spaces
 
+from core.observations import WaypointObservation
+
 DISTANCE_MARGIN = 5 # km
 WAYPOINT_DISTANCE_MIN = 0
 WAYPOINT_DISTANCE_MAX = 75
@@ -17,6 +19,8 @@ REACH_REWARD = 1
 AC_SPD = 150
 
 D_HEADING = 45
+
+NM2KM = 1.852
 
 ACTION_FREQUENCY = 10
 
@@ -34,6 +38,7 @@ class PlanWaypointEnv(gym.Env):
     - Clean up rendering
     - More elegant observation function
     - Speed changes (?)
+    - Run long training tests with the new observation function
     
     """
 
@@ -46,14 +51,11 @@ class PlanWaypointEnv(gym.Env):
         self.window_height = 512
         self.window_size = (self.window_width, self.window_height) # Size of the rendered environment
 
-        self.observation_space = spaces.Dict(
-            {
-                "waypoint_distance": spaces.Box(-np.inf, np.inf, shape = (NUM_WAYPOINTS,), dtype=np.float64),
-                "cos_difference": spaces.Box(-np.inf, np.inf, shape = (NUM_WAYPOINTS,), dtype=np.float64),
-                "sin_difference": spaces.Box(-np.inf, np.inf, shape = (NUM_WAYPOINTS,), dtype=np.float64),
-                "waypoint_reached": spaces.Box(0, 1, shape = (NUM_WAYPOINTS,), dtype=np.float64)
-            }
-        )
+        self.waypoint_obs = WaypointObservation(n=NUM_WAYPOINTS, distance_norm=WAYPOINT_DISTANCE_MAX, include_status=True)
+
+        self.observation_space = spaces.Dict({
+            **self.waypoint_obs.space(),
+        })
        
         self.action_space = spaces.Box(-1, 1, shape=(1,), dtype=np.float64)
 
@@ -83,44 +85,21 @@ class PlanWaypointEnv(gym.Env):
 
 
     def _get_obs(self):
-        """
-        Observation consists of distance to the waypoint and heading difference with respect to the waypoint
-        in cosine and sine decomposition.
-
-        """
-
-        NM2KM = 1.852
         ac_idx = bs.traf.id2idx('KL001')
+        self.ac_hdg = bs.traf.hdg[ac_idx]
 
+        # raw waypoint values (generation order) retained for _check_waypoint, _render_frame (approach C)
         self.wpt_dis = []
         self.wpt_qdr = []
         self.drift = []
-        self.wpt_cos = []
-        self.wpt_sin = []
-        
         for lat, lon in zip(self.wpt_lat, self.wpt_lon):
-            
-            self.ac_hdg = bs.traf.hdg[ac_idx]
             wpt_qdr, wpt_dis = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], lat, lon)
-        
             self.wpt_dis.append(wpt_dis * NM2KM)
             self.wpt_qdr.append(wpt_qdr)
+            self.drift.append(fn.bound_angle_positive_negative_180(self.ac_hdg - wpt_qdr))
 
-            drift = self.ac_hdg - wpt_qdr
-            drift = fn.bound_angle_positive_negative_180(drift)
-
-            self.wpt_cos.append(np.cos(np.deg2rad(drift)))
-            self.wpt_sin.append(np.sin(np.deg2rad(drift)))
-            self.drift.append(drift)
-
-        observation = {
-                "waypoint_distance": (np.array(self.wpt_reach) -1)* -1 * np.array(self.wpt_dis)/WAYPOINT_DISTANCE_MAX,
-                "cos_difference": (np.array(self.wpt_reach) -1)* -1 * np.array(self.wpt_cos),
-                "sin_difference": (np.array(self.wpt_reach) -1)* -1 * np.array(self.wpt_sin),
-                "waypoint_reached": np.array(self.wpt_reach)
-            }
-        
-        return observation
+        # waypoints are sorted by distance; waypoint_status is reordered to match (per-slot reach flag)
+        return self.waypoint_obs.observe('KL001', self.wpt_lat, self.wpt_lon, reached_flags=self.wpt_reach)
     
     def _get_info(self):
         # Here you implement any additional info that you want to return after a step,
