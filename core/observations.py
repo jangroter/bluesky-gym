@@ -42,14 +42,33 @@ def _cpa(ac_idx, int_idx):
     dcpa = np.sqrt((dx + tcpa * dvx)**2 + (dy + tcpa * dvy)**2)
     return tcpa, dcpa
 
+def _dist_to_others(own_lat, own_lon, other_lats, other_lons):
+    """Distance [nm] from one point to each of N other points.
+
+    kwikdist_matrix isn't usable here: it always zeroes the diagonal
+    (i == j) regardless of whether lat1[i]/lat2[i] actually coincide, since
+    it's built for self-vs-self matrices (e.g. all-aircraft conflict
+    detection), not a fixed point against a different set of N points.
+    Plain kwikdist broadcasts correctly once both sides are equal-length
+    arrays, so the own point is simply repeated N times.
+    """
+    n = len(other_lats)
+    own_lat_arr = np.full(n, own_lat, dtype=np.float64)
+    own_lon_arr = np.full(n, own_lon, dtype=np.float64)
+    dists = bs.tools.geo.kwikdist(
+        own_lat_arr, own_lon_arr,
+        np.asarray(other_lats, dtype=np.float64), np.asarray(other_lons, dtype=np.float64),
+    )
+    return np.asarray(dists).flatten()
+
 def _sort_by_distance(ac_idx, other_idx):
     if not other_idx:
         return []
-    dists = bs.tools.geo.kwikdist_matrix(
+    dists = _dist_to_others(
         bs.traf.lat[ac_idx], bs.traf.lon[ac_idx],
         bs.traf.lat[other_idx], bs.traf.lon[other_idx],
     )
-    return [other_idx[int(i)] for i in np.argsort(np.asarray(dists).flatten())]
+    return [other_idx[int(i)] for i in np.argsort(dists)]
 
 def _sort_by_tcpa(ac_idx, other_idx):
     tcpa_vals = [_cpa(ac_idx, i)[0] for i in other_idx]
@@ -63,8 +82,8 @@ def _sort_points_by_distance(own_lat, own_lon, point_lats, point_lons):
     """Sort static lat/lon points by distance from own position. Returns sorted indices."""
     if not len(point_lats):
         return []
-    dists = bs.tools.geo.kwikdist_matrix(own_lat, own_lon, point_lats, point_lons)
-    return [int(i) for i in np.argsort(np.asarray(dists).flatten())]
+    dists = _dist_to_others(own_lat, own_lon, point_lats, point_lons)
+    return [int(i) for i in np.argsort(dists)]
 
 class DriftObservation:
     """
@@ -431,7 +450,7 @@ class ObstacleObservation:
         "distance": _sort_points_by_distance,
     }
 
-    def __init__(self, n, sort_by="distance", distance_norm=170.0, radius_norm=50.0):
+    def __init__(self, n, sort_by="distance", distance_norm=170.0, radius_norm=1000.0):
         if callable(sort_by):
             self._sorter = sort_by
         elif sort_by in self.SORTERS:

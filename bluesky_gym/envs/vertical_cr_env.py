@@ -7,6 +7,11 @@ import bluesky_gym.envs.common.functions as fn
 import gymnasium as gym
 from gymnasium import spaces
 
+from core.observations import (
+    OwnAltitudeObservation, TargetAltitudeObservation,
+    RunwayDistanceObservation, IntruderObservation,
+)
+
 
 DISTANCE_MARGIN = 5 # km
 NM2KM = 1.852
@@ -63,25 +68,26 @@ class VerticalCREnv(gym.Env):
         self.window_height = 256
         self.window_size = (self.window_width, self.window_height) # Size of the rendered environment
 
-        self.observation_space = spaces.Dict(
-            {
-                # Runway information
-                "altitude": spaces.Box(-np.inf, np.inf, dtype=np.float64),
-                "vz": spaces.Box(-np.inf, np.inf, dtype=np.float64),
-                "target_altitude": spaces.Box(-np.inf, np.inf, dtype=np.float64),
-                "runway_distance": spaces.Box(-np.inf, np.inf, dtype=np.float64),
-                # Intruder information
-                "intruder_distance": spaces.Box(-np.inf, np.inf, shape = (NUM_INTRUDERS,), dtype=np.float64),
-                "cos_difference_pos": spaces.Box(-np.inf, np.inf, shape = (NUM_INTRUDERS,), dtype=np.float64),
-                "sin_difference_pos": spaces.Box(-np.inf, np.inf, shape = (NUM_INTRUDERS,), dtype=np.float64),
-                "altitude_difference": spaces.Box(-np.inf, np.inf, shape = (NUM_INTRUDERS,), dtype=np.float64),
-                "x_difference_speed": spaces.Box(-np.inf, np.inf, shape = (NUM_INTRUDERS,), dtype=np.float64),
-                "y_difference_speed": spaces.Box(-np.inf, np.inf, shape = (NUM_INTRUDERS,), dtype=np.float64),
-                "z_difference_speed": spaces.Box(-np.inf, np.inf, shape = (NUM_INTRUDERS,), dtype=np.float64)
-            }
+        self.altitude_obs = OwnAltitudeObservation(alt_mean=ALT_MEAN, alt_std=ALT_STD, vz_mean=VZ_MEAN, vz_std=VZ_STD)
+        self.target_alt_obs = TargetAltitudeObservation(alt_mean=ALT_MEAN, alt_std=ALT_STD)
+        self.runway_obs = RunwayDistanceObservation(
+            rwy_lat=RWY_LAT, rwy_lon=RWY_LON,
+            default_distance=DEFAULT_RWY_DIS, dist_mean=RWY_DIS_MEAN, dist_std=RWY_DIS_STD,
         )
+        self.intruder_obs = IntruderObservation(
+            n=NUM_INTRUDERS, sort_by="distance", include_vertical=True, alt_norm=ALT_STD,
+        )
+
+        self.observation_space = spaces.Dict({
+            **self.altitude_obs.space(),
+            **self.target_alt_obs.space(),
+            **self.runway_obs.space(),
+            **self.intruder_obs.space(),
+        })
        
         self.action_space = spaces.Box(-1, 1, shape=(1,), dtype=np.float64)
+
+        self.agent = "KL001"
 
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
@@ -110,77 +116,38 @@ class VerticalCREnv(gym.Env):
 
 
     def _get_obs(self):
-        """
-        Observation consists of altitude, vertical speed, target altitude and distance to runway
-        Very crude normalization in place for now
-        """
+        ac_idx = bs.traf.id2idx(self.agent)
 
-        ac_idx = bs.traf.id2idx('KL001')
+        # raw values retained for _get_reward, _render_frame (approach C)
+        self.altitude = bs.traf.alt[ac_idx]
+        self.vz = bs.traf.vs[ac_idx]
+        self.runway_distance = DEFAULT_RWY_DIS - bs.tools.geo.kwikdist(
+            RWY_LAT, RWY_LON, bs.traf.lat[ac_idx], bs.traf.lon[ac_idx]) * NM2KM
 
+        # intruder render data in creation order (approach C)
         self.intruder_distance = []
         self.cos_bearing = []
         self.sin_bearing = []
-        self.altitude_difference = []
-        self.x_difference_speed = []
-        self.y_difference_speed = []
-        self.z_difference_speed = []
-
-        self.ac_hdg = bs.traf.hdg[ac_idx]
-        self.altitude = bs.traf.alt[0]
-        self.vz = bs.traf.vs[0]
-
+        ac_hdg = bs.traf.hdg[ac_idx]
         for i in range(NUM_INTRUDERS):
-            int_idx = i+1
-            int_qdr, int_dis = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], bs.traf.lat[int_idx], bs.traf.lon[int_idx])
-
+            int_idx = i + 1
+            int_qdr, int_dis = bs.tools.geo.kwikqdrdist(
+                bs.traf.lat[ac_idx], bs.traf.lon[ac_idx],
+                bs.traf.lat[int_idx], bs.traf.lon[int_idx])
             self.intruder_distance.append(int_dis * NM2KM)
-
-            alt_dif = bs.traf.alt[int_idx] - self.altitude
-            vz_dif = bs.traf.vs[int_idx] - self.vz
-
-            self.altitude_difference.append(alt_dif)
-            self.z_difference_speed.append(vz_dif)
-
-            bearing = self.ac_hdg - int_qdr
-            bearing = fn.bound_angle_positive_negative_180(bearing)
-
+            bearing = fn.bound_angle_positive_negative_180(ac_hdg - int_qdr)
             self.cos_bearing.append(np.cos(np.deg2rad(bearing)))
             self.sin_bearing.append(np.sin(np.deg2rad(bearing)))
 
-            heading_difference = bs.traf.hdg[ac_idx] - bs.traf.hdg[int_idx]
-            x_dif = - np.cos(np.deg2rad(heading_difference)) * bs.traf.gs[int_idx]
-            y_dif = bs.traf.gs[ac_idx] - np.sin(np.deg2rad(heading_difference)) * bs.traf.gs[int_idx]
-
-            self.x_difference_speed.append(x_dif)
-            self.y_difference_speed.append(y_dif)
-        
-        self.runway_distance = (DEFAULT_RWY_DIS - bs.tools.geo.kwikdist(RWY_LAT,RWY_LON,bs.traf.lat[0],bs.traf.lon[0])*NM2KM)
-
-        # very crude normalization
-        obs_altitude = np.array([(self.altitude - ALT_MEAN)/ALT_STD])
-        obs_vz = np.array([(self.vz - VZ_MEAN) / VZ_STD])
-        obs_target_alt = np.array([((self.target_alt- ALT_MEAN)/ALT_STD)])
-        obs_runway_distance = np.array([(self.runway_distance - RWY_DIS_MEAN)/RWY_DIS_STD])
-
-        observation = {
-                "altitude": obs_altitude,
-                "vz": obs_vz,
-                "target_altitude": obs_target_alt,
-                "runway_distance": obs_runway_distance,
-                # Intruder information
-                "intruder_distance": np.array(self.intruder_distance)/DEFAULT_RWY_DIS,
-                "cos_difference_pos": np.array(self.cos_bearing),
-                "sin_difference_pos": np.array(self.sin_bearing),
-                "altitude_difference": np.array(self.altitude_difference)/ALT_STD,
-                "x_difference_speed": np.array(self.x_difference_speed)/AC_SPD,
-                "y_difference_speed": np.array(self.y_difference_speed)/AC_SPD,
-                "z_difference_speed": np.array(self.z_difference_speed)
-            }
-        
-        return observation
+        return {
+            **self.altitude_obs.observe(self.agent),
+            **self.target_alt_obs.observe(self.target_alt),
+            **self.runway_obs.observe(self.agent),
+            **self.intruder_obs.observe(self.agent),
+        }
     
-    def _generate_conflicts(self, acid = 'KL001'):
-        target_idx = bs.traf.id2idx(acid)
+    def _generate_conflicts(self):
+        target_idx = bs.traf.id2idx(self.agent)
         altitude = bs.traf.alt[target_idx]
         spd = bs.traf.gs[target_idx]
         for i in range(NUM_INTRUDERS):
@@ -227,7 +194,7 @@ class VerticalCREnv(gym.Env):
         return reward, done
 
     def _check_intrusion(self):
-        ac_idx = bs.traf.id2idx('KL001')
+        ac_idx = bs.traf.id2idx(self.agent)
         reward = 0
         for i in range(NUM_INTRUDERS):
             int_idx = i+1
@@ -266,10 +233,10 @@ class VerticalCREnv(gym.Env):
         alt_init = np.random.randint(ALT_MIN, ALT_MAX)
         self.target_alt = alt_init + np.random.randint(-TARGET_ALT_DIF,TARGET_ALT_DIF)
 
-        bs.traf.cre('KL001',actype="A320",acalt=alt_init,acspd=AC_SPD)
+        bs.traf.cre(self.agent, actype="A320", acalt=alt_init, acspd=AC_SPD)
         bs.traf.swvnav[0] = False
 
-        self._generate_conflicts(acid = 'KL001')
+        self._generate_conflicts()
 
         observation = self._get_obs()
         info = self._get_info()
