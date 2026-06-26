@@ -1,6 +1,4 @@
 import numpy as np
-import pygame
-
 import bluesky as bs
 import bluesky_gym.envs.common.functions as fn
 
@@ -10,6 +8,11 @@ from gymnasium import spaces
 from core.observations import (
     OwnAltitudeObservation, TargetAltitudeObservation,
     RunwayDistanceObservation, IntruderObservation,
+)
+from core.rendering import (
+    PygameCanvas, TopDownProjection, SideProfileProjection,
+    draw_aircraft, draw_intruder,
+    draw_side_aircraft, draw_side_intruder, draw_ground, draw_runway, draw_target_altitude,
 )
 
 
@@ -65,8 +68,8 @@ class VerticalCREnv(gym.Env):
 
     def __init__(self, render_mode=None):
         self.window_width = 512
-        self.window_height = 256
-        self.window_size = (self.window_width, self.window_height) # Size of the rendered environment
+        self.window_height = 512
+        self.window_size = (self.window_width, self.window_height)
 
         self.altitude_obs = OwnAltitudeObservation(alt_mean=ALT_MEAN, alt_std=ALT_STD, vz_mean=VZ_MEAN, vz_std=VZ_STD)
         self.target_alt_obs = TargetAltitudeObservation(alt_mean=ALT_MEAN, alt_std=ALT_STD)
@@ -104,15 +107,16 @@ class VerticalCREnv(gym.Env):
         self.total_intrusions = 0
         self.final_altitude = 0
 
-        """
-        If human-rendering is used, `self.window` will be a reference
-        to the window that we draw to. `self.clock` will be a clock that is used
-        to ensure that the environment is rendered at the correct framerate in
-        human-mode. They will remain `None` until human-mode is used for the
-        first time.
-        """
-        self.window = None
-        self.clock = None
+        half_h = self.window_height // 2
+        self.pygame_canvas = PygameCanvas(self.window_width, self.window_height)
+        self.top_projection = TopDownProjection(
+            max_distance=250, ref_lat=0, ref_lon=0,
+            viewport=(0, 0, self.window_width, half_h),
+        )
+        self.side_projection = SideProfileProjection(
+            max_distance=250, max_altitude=5000,
+            viewport=(0, half_h, self.window_width, half_h),
+        )
 
 
     def _get_obs(self):
@@ -233,8 +237,15 @@ class VerticalCREnv(gym.Env):
         alt_init = np.random.randint(ALT_MIN, ALT_MAX)
         self.target_alt = alt_init + np.random.randint(-TARGET_ALT_DIF,TARGET_ALT_DIF)
 
-        bs.traf.cre(self.agent, actype="A320", acalt=alt_init, acspd=AC_SPD)
+        start_lat, start_lon = fn.get_point_at_distance(RWY_LAT, RWY_LON, DEFAULT_RWY_DIS, 270)
+        mid_lat, mid_lon = fn.get_point_at_distance(RWY_LAT, RWY_LON, DEFAULT_RWY_DIS / 2, 270)
+
+        bs.traf.cre(self.agent, actype="A320",
+                    aclat=start_lat, aclon=start_lon, achdg=90,
+                    acalt=alt_init, acspd=AC_SPD)
         bs.traf.swvnav[0] = False
+
+        self.top_projection.update_ref(mid_lat, mid_lon)
 
         self._generate_conflicts()
 
@@ -274,122 +285,58 @@ class VerticalCREnv(gym.Env):
         pass
 
     def _render_frame(self):
-        if self.window is None and self.render_mode == "human":
-            pygame.init()
-            pygame.display.init()
-            self.window = pygame.display.set_mode(self.window_size)
+        ac_idx = bs.traf.id2idx(self.agent)
+        canvas = self.pygame_canvas.begin_frame()
+        ac_length_px = self.side_projection.scale_horizontal(4)
 
-        if self.clock is None and self.render_mode == "human":
-            self.clock = pygame.time.Clock()
-
-        zero_offset = 25
-        max_distance = 180 # width of screen in km
-
-        canvas = pygame.Surface(self.window_size)
-        canvas.fill((135,206,235))
-
-        # draw a ground surface
-        pygame.draw.rect(
-            canvas, 
-            (154,205,50),
-            pygame.Rect(
-                (0,self.window_height-50),
-                (self.window_width, 50)
-                ),
-        )
-        
-        # draw target altitude
-        max_alt = 5000
-        target_alt = int((-1*(self.target_alt-max_alt)/max_alt)*(self.window_height-50))
-
-        pygame.draw.line(
-            canvas,
-            (255,255,255),
-            (0,target_alt),
-            (self.window_width,target_alt)
-        )
-
-        # draw runway
-        runway_length = 30
-        runway_start = int(((self.runway_distance + zero_offset)/max_distance)*self.window_width)
-        runway_end = int(runway_start + (runway_length/max_distance)*self.window_width)
-
-        pygame.draw.line(
-            canvas,
-            (119,136,153),
-            (runway_start,self.window_height - 50),
-            (runway_end,self.window_height - 50),
-            width = 3
-        )
-
-        # draw aircraft
-        aircraft_alt = int((-1*(self.altitude-max_alt)/max_alt)*(self.window_height-50))
-        aircraft_start = int(((zero_offset)/max_distance)*self.window_width)
-        aircraft_end = int(aircraft_start + (4/max_distance)*self.window_width)
-
-        pygame.draw.line(
-            canvas,
-            (0,0,0),
-            (aircraft_start,aircraft_alt),
-            (aircraft_end,aircraft_alt),
-            width = 5
-        )
+        # --- Top half: top-down view ---
+        self.top_projection.clip(canvas)
+        ax, ay = self.top_projection.project(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx])
+        draw_aircraft(canvas, ax, ay, bs.traf.hdg[ac_idx],
+                      body_km=8, heading_km=50, projection=self.top_projection)
 
         for i in range(NUM_INTRUDERS):
-            int_idx = i+1
-            int_alt = int((-1*(bs.traf.alt[int_idx]-max_alt)/max_alt)*(self.window_height-50))
-            int_x_dis = self.intruder_distance[int_idx - 1] * self.cos_bearing[int_idx - 1]
-            int_y_dis = self.intruder_distance[int_idx - 1] * self.sin_bearing[int_idx - 1]
-            width_temp = int(5+int_y_dis/20)
-            aircraft_start = int(((zero_offset + int_x_dis )/max_distance)*self.window_width)
-            aircraft_end = int(aircraft_start + (4/max_distance)*self.window_width)
-            color = (255,255,255) if abs(int_y_dis) > DISTANCE_MARGIN else 'red'
+            int_idx = i + 1
+            ix, iy = self.top_projection.project(bs.traf.lat[int_idx], bs.traf.lon[int_idx])
+            int_dis = bs.tools.geo.kwikdist(
+                bs.traf.lat[ac_idx], bs.traf.lon[ac_idx],
+                bs.traf.lat[int_idx], bs.traf.lon[int_idx])
+            vert_dis = abs(bs.traf.alt[ac_idx] - bs.traf.alt[int_idx])
+            draw_intruder(canvas, ix, iy, bs.traf.hdg[int_idx], self.top_projection,
+                          body_km=3, heading_km=10,
+                          safety_radius_km=INTRUSION_DISTANCE * NM2KM,
+                          in_intrusion=int_dis < INTRUSION_DISTANCE and vert_dis < VERTICAL_MARGIN)
+        self.top_projection.unclip(canvas)
 
-            pygame.draw.line(
-                canvas,
-                color,
-                (aircraft_start,int_alt),
-                (aircraft_end,int_alt),
-                width = width_temp
-            )
+        # --- Bottom half: side profile (x-aligned with top view) ---
+        self.side_projection.clip(canvas)
+        draw_ground(canvas, self.side_projection)
 
-            hor_margin = (DISTANCE_MARGIN*NM2KM/max_distance)*self.window_width
-            ver_margin = (VERTICAL_MARGIN/max_alt)*self.window_height
+        _, target_y = self.side_projection.project(0, self.target_alt)
+        draw_target_altitude(canvas, target_y, self.side_projection)
 
-            pygame.draw.line(
-                canvas,
-                'black',
-                (aircraft_start-hor_margin/2,int_alt-ver_margin),
-                (aircraft_end+hor_margin/2,int_alt-ver_margin),
-                width = 1
-            )
-            pygame.draw.line(
-                canvas,
-                'black',
-                (aircraft_start-hor_margin/2,int_alt+ver_margin),
-                (aircraft_end+hor_margin/2,int_alt+ver_margin),
-                width = 1
-            )
-            pygame.draw.line(
-                canvas,
-                'black',
-                (aircraft_start-hor_margin/2,int_alt-ver_margin),
-                (aircraft_start-hor_margin/2,int_alt+ver_margin),
-                width = 1
-            )
-            pygame.draw.line(
-                canvas,
-                'black',
-                (aircraft_end+hor_margin/2,int_alt-ver_margin),
-                (aircraft_end+hor_margin/2,int_alt+ver_margin),
-                width = 1
-            )
+        rwy_x, _ = self.top_projection.project(RWY_LAT, RWY_LON)
+        _, rwy_y = self.side_projection.project(0, 0)
+        draw_runway(canvas, rwy_x, rwy_y, self.side_projection.scale_horizontal(30))
 
+        ac_side_y = self.side_projection.altitude_to_y(self.altitude)
+        draw_side_aircraft(canvas, ax, ac_side_y, ac_length_px)
 
+        for i in range(NUM_INTRUDERS):
+            int_idx = i + 1
+            ix, _ = self.top_projection.project(bs.traf.lat[int_idx], bs.traf.lon[int_idx])
+            int_side_y = self.side_projection.altitude_to_y(bs.traf.alt[int_idx])
+            int_dis = bs.tools.geo.kwikdist(
+                bs.traf.lat[ac_idx], bs.traf.lon[ac_idx],
+                bs.traf.lat[int_idx], bs.traf.lon[int_idx])
+            vert_dis = abs(bs.traf.alt[ac_idx] - bs.traf.alt[int_idx])
+            draw_side_intruder(canvas, ix, int_side_y, ac_length_px, self.side_projection,
+                               in_intrusion=int_dis < INTRUSION_DISTANCE and vert_dis < VERTICAL_MARGIN,
+                               hor_margin_km=INTRUSION_DISTANCE * NM2KM,
+                               ver_margin_alt=VERTICAL_MARGIN)
+        self.side_projection.unclip(canvas)
 
-        self.window.blit(canvas, canvas.get_rect())
-        pygame.display.update()
-        self.clock.tick(self.metadata["render_fps"])
+        self.pygame_canvas.end_frame(canvas)
         
     def close(self):
         bs.stack.stack('quit')

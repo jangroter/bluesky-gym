@@ -92,9 +92,8 @@ class StaticObstacleEnv(gym.Env):
 
         self.pygame_canvas = PygameCanvas(self.window_width, self.window_height)
         self.projection = TopDownProjection(
-            max_distance=MAX_DISTANCE,
-            viewport=(0, 0, self.window_width, self.window_height),
-            ref_lat=0, ref_lon=0,
+            max_distance=MAX_DISTANCE, ref_lat=0, ref_lon=0,
+            window_size=(self.window_width, self.window_height),
         )
 
     def reset(self, seed=None, options=None):

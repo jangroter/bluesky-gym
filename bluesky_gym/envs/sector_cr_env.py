@@ -82,8 +82,8 @@ class SectorCREnv(gym.Env):
 
         self.pygame_canvas = PygameCanvas(self.window_width, self.window_height)
         self.projection = TopDownProjection(
-            max_distance=200, viewport=(0, 0, self.window_width, self.window_height),
-            ref_lat=CENTER[0], ref_lon=CENTER[1],
+            max_distance=200, ref_lat=CENTER[0], ref_lon=CENTER[1],
+            window_size=(self.window_width, self.window_height),
         )
     
     def reset(self, seed=None, options=None):
@@ -102,9 +102,8 @@ class SectorCREnv(gym.Env):
             for p1 in self.poly_points for p2 in self.poly_points
         ) * NM2KM
         self.projection = TopDownProjection(
-            max_distance=max_distance,
-            viewport=(0, 0, self.window_width, self.window_height),
-            ref_lat=CENTER[0], ref_lon=CENTER[1],
+            max_distance=max_distance, ref_lat=CENTER[0], ref_lon=CENTER[1],
+            window_size=(self.window_width, self.window_height),
         )
         
         if self.density_mode == "normal":

@@ -1,12 +1,14 @@
 import numpy as np
-import pygame
-
 import bluesky as bs
 
 import gymnasium as gym
 from gymnasium import spaces
 
 from core.observations import OwnAltitudeObservation, TargetAltitudeObservation, RunwayDistanceObservation
+from core.rendering import (
+    PygameCanvas, SideProfileProjection,
+    draw_side_aircraft, draw_ground, draw_runway, draw_target_altitude,
+)
 
 ACTION_2_MS = 12.5
 
@@ -71,15 +73,11 @@ class DescentEnv(gym.Env):
         self.total_reward = 0
         self.final_altitude = 0
 
-        """
-        If human-rendering is used, `self.window` will be a reference
-        to the window that we draw to. `self.clock` will be a clock that is used
-        to ensure that the environment is rendered at the correct framerate in
-        human-mode. They will remain `None` until human-mode is used for the
-        first time.
-        """
-        self.window = None
-        self.clock = None
+        self.pygame_canvas = PygameCanvas(self.window_width, self.window_height)
+        self.projection = SideProfileProjection(
+            max_distance=180, max_altitude=5000,
+            window_size=(self.window_width, self.window_height),
+        )
 
 
     def _get_obs(self):
@@ -189,70 +187,20 @@ class DescentEnv(gym.Env):
         self.runway_distance = (
             200 - bs.tools.geo.kwikdist(52, 4, bs.traf.lat[0], bs.traf.lon[0]) * 1.852
         )
-        if self.window is None and self.render_mode == "human":
-            pygame.init()
-            pygame.display.init()
-            self.window = pygame.display.set_mode(self.window_size)
+        canvas = self.pygame_canvas.begin_frame()
 
-        if self.clock is None and self.render_mode == "human":
-            self.clock = pygame.time.Clock()
+        draw_ground(canvas, self.projection)
 
-        zero_offset = 25
-        max_distance = 180 # width of screen in km
+        _, target_y = self.projection.project(0, self.target_alt)
+        draw_target_altitude(canvas, target_y, self.projection)
 
-        canvas = pygame.Surface(self.window_size)
-        canvas.fill((135,206,235))
+        rwy_x, rwy_y = self.projection.project(self.runway_distance, 0)
+        draw_runway(canvas, rwy_x, rwy_y, self.projection.scale_horizontal(30))
 
-        # draw a ground surface
-        pygame.draw.rect(
-            canvas, 
-            (154,205,50),
-            pygame.Rect(
-                (0,self.window_height-50),
-                (self.window_width, 50)
-                ),
-        )
-        
-        # draw target altitude
-        max_alt = 5000
-        target_alt = int((-1*(self.target_alt-max_alt)/max_alt)*(self.window_height-50))
+        ac_x, ac_y = self.projection.project(0, self.altitude)
+        draw_side_aircraft(canvas, ac_x, ac_y, self.projection.scale_horizontal(4))
 
-        pygame.draw.line(
-            canvas,
-            (255,255,255),
-            (0,target_alt),
-            (self.window_width,target_alt)
-        )
-
-        # draw runway
-        runway_length = 30
-        runway_start = int(((self.runway_distance + zero_offset)/max_distance)*self.window_width)
-        runway_end = int(runway_start + (runway_length/max_distance)*self.window_width)
-
-        pygame.draw.line(
-            canvas,
-            (119,136,153),
-            (runway_start,self.window_height - 50),
-            (runway_end,self.window_height - 50),
-            width = 3
-        )
-
-        # draw aircraft
-        aircraft_alt = int((-1*(self.altitude-max_alt)/max_alt)*(self.window_height-50))
-        aircraft_start = int(((zero_offset)/max_distance)*self.window_width)
-        aircraft_end = int(aircraft_start + (4/max_distance)*self.window_width)
-
-        pygame.draw.line(
-            canvas,
-            (0,0,0),
-            (aircraft_start,aircraft_alt),
-            (aircraft_end,aircraft_alt),
-            width = 5
-        )
-
-        self.window.blit(canvas, canvas.get_rect())
-        pygame.display.update()
-        self.clock.tick(self.metadata["render_fps"])
+        self.pygame_canvas.end_frame(canvas)
         
     def close(self):
         bs.stack.stack('quit')

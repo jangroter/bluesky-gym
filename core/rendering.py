@@ -79,15 +79,20 @@ class TopDownProjection:
     ----------
     max_distance : float
         World width in km that maps to the viewport width.
-    viewport : tuple of (x_off, y_off, width, height)
-        Region of the canvas this projection draws into.
     ref_lat : float
         Reference latitude (center of view) in degrees.
     ref_lon : float
         Reference longitude (center of view) in degrees.
+    window_size : tuple of (width, height), optional
+        Canvas size in pixels. Uses the full canvas as the drawing area.
+        Provide this OR viewport, not both.
+    viewport : tuple of (x_off, y_off, width, height), optional
+        Sub-region of the canvas for split-level views. Overrides window_size.
     """
 
-    def __init__(self, max_distance, viewport, ref_lat, ref_lon):
+    def __init__(self, max_distance, ref_lat, ref_lon, window_size=None, viewport=None):
+        if viewport is None:
+            viewport = (0, 0, *window_size)
         self.max_distance = max_distance
         self.viewport = viewport
         self.ref_lat = ref_lat
@@ -132,6 +137,15 @@ class TopDownProjection:
         """Convert a world distance in km to pixels."""
         return km * self._px_per_km
 
+    def clip(self, canvas):
+        """Restrict drawing to this projection's viewport. Call unclip() when done."""
+        canvas.set_clip(pygame.Rect(self.viewport))
+
+    def unclip(self, canvas):
+        """Remove viewport clipping and draw a border around the viewport."""
+        canvas.set_clip(None)
+        pygame.draw.rect(canvas, WHITE, pygame.Rect(self.viewport), width=1)
+
 
 class SideProfileProjection:
     """Side-profile projection: horizontal distance + altitude to screen pixels.
@@ -142,16 +156,22 @@ class SideProfileProjection:
         World width in km mapped to viewport width.
     max_altitude : float
         Maximum altitude value mapped to the top of the drawable area.
-    viewport : tuple of (x_off, y_off, width, height)
-        Region of the canvas this projection draws into.
+    window_size : tuple of (width, height), optional
+        Canvas size in pixels. Uses the full canvas as the drawing area.
+        Provide this OR viewport, not both.
+    viewport : tuple of (x_off, y_off, width, height), optional
+        Sub-region of the canvas for split-level views. Overrides window_size.
     x_offset : float
         Horizontal pixel offset for the origin (ownship position).
     ground_height : int
         Height in pixels of the ground strip at the bottom of the viewport.
     """
 
-    def __init__(self, max_distance, max_altitude, viewport,
+    def __init__(self, max_distance, max_altitude,
+                 window_size=None, viewport=None,
                  x_offset=25, ground_height=50):
+        if viewport is None:
+            viewport = (0, 0, *window_size)
         self.max_distance = max_distance
         self.max_altitude = max_altitude
         self.viewport = viewport
@@ -176,6 +196,15 @@ class SideProfileProjection:
     def scale_vertical(self, altitude_units):
         """Convert altitude units to pixels."""
         return (altitude_units / self.max_altitude) * (self._h - self.ground_height)
+
+    def clip(self, canvas):
+        """Restrict drawing to this projection's viewport. Call unclip() when done."""
+        canvas.set_clip(pygame.Rect(self.viewport))
+
+    def unclip(self, canvas):
+        """Remove viewport clipping and draw a border around the viewport."""
+        canvas.set_clip(None)
+        pygame.draw.rect(canvas, WHITE, pygame.Rect(self.viewport), width=1)
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +275,13 @@ def draw_radial_line(canvas, x, y, heading_deg, length_km, projection, *,
                      width=width)
 
 
+def draw_line(canvas, x1, y1, x2, y2, *, color=BLACK, width=1):
+    """Draw a line between two screen positions."""
+    pygame.draw.line(canvas, color,
+                     (int(x1), int(y1)), (int(x2), int(y2)),
+                     width=width)
+
+
 # ---------------------------------------------------------------------------
 # Side-profile drawing functions
 # ---------------------------------------------------------------------------
@@ -258,29 +294,26 @@ def draw_side_aircraft(canvas, x, y, length_px, *, color=BLACK, width=5):
 
 
 def draw_side_intruder(canvas, x, y, length_px, projection, *,
-                       lateral_distance=0, in_intrusion=False,
-                       color_safe=WHITE, color_intrusion=(255, 0, 0),
+                       color=BLACK, width=5, in_intrusion=False,
                        hor_margin_km=None, ver_margin_alt=None):
-    """Draw a side-profile intruder with depth-based width and collision box.
+    """Draw a side-profile intruder aircraft with optional collision box.
 
     Parameters
     ----------
-    lateral_distance : float
-        Cross-track distance, used to vary line width for depth effect.
+    in_intrusion : bool
+        If True, the collision box is drawn in red.
     hor_margin_km : float, optional
-        Horizontal half-width of collision box in km.
+        Half-width of collision box in km (matches safety_radius_km in top view).
     ver_margin_alt : float, optional
-        Vertical half-height of collision box in altitude units.
+        Half-height of collision box in altitude units.
     """
-    color = color_intrusion if in_intrusion else color_safe
-    line_width = max(1, int(5 + lateral_distance / 20))
-
-    draw_side_aircraft(canvas, x, y, length_px, color=color, width=line_width)
+    draw_side_aircraft(canvas, x, y, length_px, color=color, width=width)
 
     if hor_margin_km is not None and ver_margin_alt is not None:
-        hw = projection.scale_horizontal(hor_margin_km) / 2
+        hw = projection.scale_horizontal(hor_margin_km)
         hh = projection.scale_vertical(ver_margin_alt)
-        draw_collision_box(canvas, x + length_px / 2, y, hw, hh)
+        box_color = CRIMSON if in_intrusion else BLACK
+        draw_collision_box(canvas, x + length_px / 2, y, hw, hh, color=box_color)
 
 
 def draw_collision_box(canvas, cx, cy, half_width_px, half_height_px, *,
@@ -296,12 +329,12 @@ def draw_collision_box(canvas, cx, cy, half_width_px, half_height_px, *,
     pygame.draw.line(canvas, color, (right, top), (right, bottom), width=width)
 
 
-def draw_ground(canvas, viewport, *, ground_height=50, color=OLIVE_GREEN):
-    """Draw a ground rectangle at the bottom of a viewport."""
-    x_off, y_off, w, h = viewport
+def draw_ground(canvas, projection, *, color=OLIVE_GREEN):
+    """Draw a ground rectangle at the bottom of the projection's viewport."""
+    x_off, y_off, w, h = projection.viewport
     pygame.draw.rect(canvas, color,
-                     pygame.Rect((x_off, y_off + h - ground_height),
-                                 (w, ground_height)))
+                     pygame.Rect((x_off, y_off + h - projection.ground_height),
+                                 (w, projection.ground_height)))
 
 
 def draw_runway(canvas, x_start, y, length_px, *, color=SLATE_GRAY, width=3):
@@ -312,9 +345,9 @@ def draw_runway(canvas, x_start, y, length_px, *, color=SLATE_GRAY, width=3):
                      width=width)
 
 
-def draw_target_altitude(canvas, y, viewport, *, color=WHITE):
-    """Draw a horizontal target altitude line spanning the viewport width."""
-    x_off, _, w, _ = viewport
+def draw_target_altitude(canvas, y, projection, *, color=WHITE):
+    """Draw a horizontal target altitude line spanning the projection's viewport width."""
+    x_off, _, w, _ = projection.viewport
     pygame.draw.line(canvas, color,
                      (x_off, int(y)),
                      (x_off + w, int(y)))

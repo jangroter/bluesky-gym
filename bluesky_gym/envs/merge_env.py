@@ -1,8 +1,6 @@
 # TODO: change faf_reached to standardized waypoint reached approach (building on waypoint observation functionality)
 
 import numpy as np
-import pygame
-
 import bluesky as bs
 import bluesky_gym.envs.common.functions as fn
 
@@ -12,6 +10,11 @@ from gymnasium import spaces
 import random
 
 from core.observations import DriftObservation, OwnAirspeedObservation, WaypointObservation, IntruderObservation
+from core.rendering import (
+    PygameCanvas, TopDownProjection,
+    draw_aircraft, draw_intruder, draw_waypoint, draw_radial_line, draw_line,
+    BLACK, WHITE, BRIGHT_GREEN,
+)
 
 DISTANCE_MARGIN = 10 # km
 REACH_REWARD = 1
@@ -45,8 +48,8 @@ RWY_LAT = 52.36239301495972
 RWY_LON = 4.713195734579777
 
 distance_faf_rwy = 200 # NM
-bearing_faf_rwy = 0
-FIX_LAT, FIX_LON = fn.get_point_at_distance(RWY_LAT, RWY_LON, distance_faf_rwy, bearing_faf_rwy)
+FIX_LAT = RWY_LAT
+FIX_LON = RWY_LON + (distance_faf_rwy / 60) / np.cos(np.radians(RWY_LAT))
 
 class MergeEnv(gym.Env):
     """ 
@@ -93,8 +96,11 @@ class MergeEnv(gym.Env):
         self.total_intrusions = 0
         self.faf_reached = 0
 
-        self.window = None
-        self.clock = None
+        self.pygame_canvas = PygameCanvas(self.window_width, self.window_height)
+        self.projection = TopDownProjection(
+            max_distance=500, ref_lat=FIX_LAT, ref_lon=FIX_LON,
+            window_size=(self.window_width, self.window_height),
+        )
         self.nac = NUM_AC
         self.wpt_reach = 0
         self.wpt_lat = FIX_LAT
@@ -113,12 +119,12 @@ class MergeEnv(gym.Env):
         self.total_intrusions = 0
         self.faf_reached = 0
 
-        # ownship spawn location
-        bearing_to_pos = random.uniform(-D_HEADING, D_HEADING) # heading radial towards FAF
-        distance_to_pos = random.uniform(SPAWN_DISTANCE_MIN,SPAWN_DISTANCE_MAX)  # distance to faf 
+        # ownship spawn location (east of FAF, heading west toward it)
+        bearing_to_pos = 90 + random.uniform(-D_HEADING, D_HEADING)
+        distance_to_pos = random.uniform(SPAWN_DISTANCE_MIN, SPAWN_DISTANCE_MAX)
         rlat, rlon = fn.get_point_at_distance(FIX_LAT, FIX_LON, distance_to_pos, bearing_to_pos)
 
-        bs.traf.cre(self.agent,actype="A320",acspd=AC_SPD, aclat= rlat, aclon= rlon, achdg=bearing_to_pos-180,acalt=10000)
+        bs.traf.cre(self.agent, actype="A320", acspd=AC_SPD, aclat=rlat, aclon=rlon, achdg=bearing_to_pos - 180, acalt=10000)
 
         # generate other aircraft
         self._gen_aircraft()
@@ -149,11 +155,11 @@ class MergeEnv(gym.Env):
     
     def _gen_aircraft(self):
         for i in range(NUM_AC-1):
-            bearing_to_pos = random.uniform(-D_HEADING, D_HEADING) # heading radial towards FAF
-            distance_to_pos = random.uniform(INTRUDER_DISTANCE_MIN,INTRUDER_DISTANCE_MAX) # distance to faf 
+            bearing_to_pos = 90 + random.uniform(-D_HEADING, D_HEADING)
+            distance_to_pos = random.uniform(INTRUDER_DISTANCE_MIN, INTRUDER_DISTANCE_MAX)
             lat_ac, lon_ac = fn.get_point_at_distance(self.wpt_lat, self.wpt_lon, distance_to_pos, bearing_to_pos)
 
-            bs.traf.cre(f'INT{i}',actype="A320",acspd=AC_SPD,aclat=lat_ac,aclon=lon_ac,achdg=bearing_to_pos-180,acalt=10000)
+            bs.traf.cre(f'INT{i}', actype="A320", acspd=AC_SPD, aclat=lat_ac, aclon=lon_ac, achdg=bearing_to_pos - 180, acalt=10000)
             bs.stack.stack(f"INT{i} addwpt {FIX_LAT} {FIX_LON}")
             bs.stack.stack(f"INT{i} dest {RWY_LAT} {RWY_LON}")
         bs.stack.stack('reso off')
@@ -239,162 +245,42 @@ class MergeEnv(gym.Env):
         bs.stack.stack(f"SPD KL001 {speed_new}")
         
     def _render_frame(self):
-        if self.window is None and self.render_mode == "human":
-            pygame.init()
-            pygame.display.init()
-            self.window = pygame.display.set_mode(self.window_size)
-
-        if self.clock is None and self.render_mode == "human":
-            self.clock = pygame.time.Clock()
-
-        max_distance = 500 # width of screen in km
-
-        canvas = pygame.Surface(self.window_size)
-        canvas.fill((135,206,235)) 
-
-        circle_x = self.window_width/2
-        circle_y = self.window_height/2
-
-        pygame.draw.circle(
-            canvas, 
-            (255,255,255),
-            (circle_x,circle_y),
-            radius = 4,
-            width = 0
-        )
-        
-        pygame.draw.circle(
-            canvas, 
-            (255,255,255),
-            (circle_x,circle_y),
-            radius = (DISTANCE_MARGIN/max_distance)*self.window_width,
-            width = 2
-        )
-
-        # draw line to faf
-        heading_length = 5000
-        heading_end_x = ((np.cos(np.deg2rad(180)) * heading_length)/max_distance)*self.window_width
-        heading_end_y = ((np.sin(np.deg2rad(180)) * heading_length)/max_distance)*self.window_width
-        pygame.draw.line(canvas,
-        (0,0,0),
-        (circle_x,circle_y),
-        (circle_x+heading_end_x/2,circle_y-heading_end_y/2),
-        width = 2
-        )
-
-        # heading boundary lines
-        he_x_l = ((np.cos(np.deg2rad(180+135)) * heading_length)/max_distance)*self.window_width
-        he_y_l = ((np.sin(np.deg2rad(180+135)) * heading_length)/max_distance)*self.window_width
-        he_x_r = ((np.cos(np.deg2rad(180-135)) * heading_length)/max_distance)*self.window_width
-        he_y_r = ((np.sin(np.deg2rad(180-135)) * heading_length)/max_distance)*self.window_width
-        pygame.draw.line(canvas,
-        (3,252,11),
-        (circle_x,circle_y),
-        (circle_x+he_x_l/2,circle_y-he_y_l/2),
-        width = 4
-        )
-        pygame.draw.line(canvas,
-        (3,252,11),
-        (circle_x,circle_y),
-        (circle_x+he_x_r/2,circle_y-he_y_r/2),
-        width = 4
-        )
-
-        # draw rwy start
-        rwy_faf_qdr, rwy_faf_dis = bs.tools.geo.kwikqdrdist(self.wpt_lat, self.wpt_lon, RWY_LAT, RWY_LON)
-        x_pos = (circle_x)+(np.cos(np.deg2rad(rwy_faf_qdr))*(rwy_faf_dis * NM2KM)/max_distance)*self.window_width
-        y_pos = (circle_y)-(np.sin(np.deg2rad(rwy_faf_qdr))*(rwy_faf_dis * NM2KM)/max_distance)*self.window_height
-        heading_length = 5000
-        heading_end_x = ((np.cos(np.deg2rad(180)) * heading_length)/max_distance)*self.window_width
-        heading_end_y = ((np.sin(np.deg2rad(180)) * heading_length)/max_distance)*self.window_width
-        pygame.draw.line(canvas,
-        (255,255,255),
-        (x_pos,y_pos),
-        (circle_x+heading_end_x/2,circle_y-heading_end_y/2),
-        width = 4
-        )
-
-        # draw ownship
         ac_idx = bs.traf.id2idx('KL001')
-        ac_length = 8
-        heading_end_x = ((np.cos(np.deg2rad(bs.traf.hdg[ac_idx])) * ac_length)/max_distance)*self.window_width
-        heading_end_y = ((np.sin(np.deg2rad(bs.traf.hdg[ac_idx])) * ac_length)/max_distance)*self.window_width
+        canvas = self.pygame_canvas.begin_frame()
+        cx, cy = self.projection.center
 
-        own_qdr, own_dis = bs.tools.geo.kwikqdrdist(self.wpt_lat, self.wpt_lon, bs.traf.lat[ac_idx], bs.traf.lon[ac_idx])
-        x_pos = (circle_x)+(np.cos(np.deg2rad(own_qdr))*(own_dis * NM2KM)/max_distance)*self.window_width
-        y_pos = (circle_y)-(np.sin(np.deg2rad(own_qdr))*(own_dis * NM2KM)/max_distance)*self.window_height
-        pygame.draw.line(canvas,
-            (0,0,0),
-            (x_pos,y_pos),
-            ((x_pos)+heading_end_x/2,(y_pos)-heading_end_y/2),
-            width = 4
-        )
+        # FAF waypoint at center
+        draw_waypoint(canvas, cx, cy, DISTANCE_MARGIN, self.projection)
 
-        # draw heading line
-        heading_length = 10
-        heading_end_x = ((np.cos(np.deg2rad(bs.traf.hdg[ac_idx])) * heading_length)/max_distance)*self.window_width
-        heading_end_y = ((np.sin(np.deg2rad(bs.traf.hdg[ac_idx])) * heading_length)/max_distance)*self.window_width
+        # Approach corridor: center line + boundary lines
+        draw_radial_line(canvas, cx, cy, 270, length_km=5000, projection=self.projection,
+                         color=BLACK, width=2)
+        draw_radial_line(canvas, cx, cy, 270 + 135, length_km=5000, projection=self.projection,
+                         color=BRIGHT_GREEN, width=4)
+        draw_radial_line(canvas, cx, cy, 270 - 135, length_km=5000, projection=self.projection,
+                         color=BRIGHT_GREEN, width=4)
 
-        pygame.draw.line(canvas,
-            (0,0,0),
-            (x_pos,y_pos),
-            ((x_pos)+heading_end_x,(y_pos)-heading_end_y),
-            width = 1
-        )
+        # Runway line
+        rwy_x, rwy_y = self.projection.project(RWY_LAT, RWY_LON)
+        draw_line(canvas, cx, cy, rwy_x, rwy_y, color=WHITE, width=4)
 
-        # draw intruders
-        ac_length = 3
+        # Ownship
+        x, y = self.projection.project(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx])
+        draw_aircraft(canvas, x, y, bs.traf.hdg[ac_idx],
+                      body_km=8, heading_km=10, projection=self.projection)
 
-        for i in range(1,NUM_AC):
-            int_idx = i
-            int_hdg = bs.traf.hdg[int_idx]
-            heading_end_x = ((np.cos(np.deg2rad(int_hdg)) * ac_length)/max_distance)*self.window_width
-            heading_end_y = ((np.sin(np.deg2rad(int_hdg)) * ac_length)/max_distance)*self.window_width
+        # Intruders
+        for i in range(1, NUM_AC):
+            ix, iy = self.projection.project(bs.traf.lat[i], bs.traf.lon[i])
+            separation = bs.tools.geo.kwikdist(
+                bs.traf.lat[ac_idx], bs.traf.lon[ac_idx],
+                bs.traf.lat[i], bs.traf.lon[i])
+            draw_intruder(canvas, ix, iy, bs.traf.hdg[i], self.projection,
+                          body_km=3, heading_km=10,
+                          safety_radius_km=INTRUSION_DISTANCE * NM2KM,
+                          in_intrusion=separation < INTRUSION_DISTANCE)
 
-            int_qdr, int_dis = bs.tools.geo.kwikqdrdist(self.wpt_lat, self.wpt_lon, bs.traf.lat[int_idx], bs.traf.lon[int_idx])
-
-            # determine color
-            if int_dis < INTRUSION_DISTANCE:
-                color = (220,20,60)
-            else: 
-                color = (80,80,80)
-            if i==0:
-                color = (252, 43, 28)
-
-            x_pos = (circle_x)+(np.cos(np.deg2rad(int_qdr))*(int_dis * NM2KM)/max_distance)*self.window_width
-            y_pos = (circle_y)-(np.sin(np.deg2rad(int_qdr))*(int_dis * NM2KM)/max_distance)*self.window_height
-
-            pygame.draw.line(canvas,
-                color,
-                (x_pos,y_pos),
-                ((x_pos)+heading_end_x,(y_pos)-heading_end_y),
-                width = 4
-            )
-
-            # draw heading line
-            heading_length = 10
-            heading_end_x = ((np.cos(np.deg2rad(int_hdg)) * heading_length)/max_distance)*self.window_width
-            heading_end_y = ((np.sin(np.deg2rad(int_hdg)) * heading_length)/max_distance)*self.window_width
-
-            pygame.draw.line(canvas,
-                color,
-                (x_pos,y_pos),
-                ((x_pos)+heading_end_x,(y_pos)-heading_end_y),
-                width = 1
-            )
-
-            pygame.draw.circle(
-                canvas, 
-                color,
-                (x_pos,y_pos),
-                radius = (INTRUSION_DISTANCE*NM2KM/max_distance)*self.window_width,
-                width = 2
-            )
-
-        # PyGame update
-        self.window.blit(canvas, canvas.get_rect())
-        pygame.display.update()
-        self.clock.tick(self.metadata["render_fps"])
+        self.pygame_canvas.end_frame(canvas)
         
     def close(self):
         bs.stack.stack('quit')
