@@ -1,6 +1,4 @@
 import numpy as np
-import pygame
-
 import bluesky as bs
 import bluesky_gym.envs.common.functions as fn
 
@@ -8,6 +6,7 @@ import gymnasium as gym
 from gymnasium import spaces
 
 from core.observations import WaypointObservation
+from core.rendering import PygameCanvas, TopDownProjection, draw_aircraft, draw_waypoint
 
 DISTANCE_MARGIN = 5 # km
 WAYPOINT_DISTANCE_MIN = 0
@@ -73,15 +72,11 @@ class PlanWaypointEnv(gym.Env):
         self.total_reward = 0
         self.waypoints_completed = 0
 
-        """
-        If human-rendering is used, `self.window` will be a reference
-        to the window that we draw to. `self.clock` will be a clock that is used
-        to ensure that the environment is rendered at the correct framerate in
-        human-mode. They will remain `None` until human-mode is used for the
-        first time.
-        """
-        self.window = None
-        self.clock = None
+        self.pygame_canvas = PygameCanvas(self.window_width, self.window_height)
+        self.projection = TopDownProjection(
+            max_distance=200, viewport=(0, 0, self.window_width, self.window_height),
+            ref_lat=0, ref_lon=0,
+        )
 
 
     def _get_obs(self):
@@ -205,74 +200,19 @@ class PlanWaypointEnv(gym.Env):
         return reward
 
     def _render_frame(self):
-        if self.window is None and self.render_mode == "human":
-            pygame.init()
-            pygame.display.init()
-            self.window = pygame.display.set_mode(self.window_size)
-
-        if self.clock is None and self.render_mode == "human":
-            self.clock = pygame.time.Clock()
-
-        max_distance = 200 # width of screen in km
-
-        canvas = pygame.Surface(self.window_size)
-        canvas.fill((135,206,235))
-
-        # draw ownship
         ac_idx = bs.traf.id2idx('KL001')
-        ac_length = 8
-        heading_end_x = ((np.cos(np.deg2rad(bs.traf.hdg[ac_idx])) * ac_length)/max_distance)*self.window_width
-        heading_end_y = ((np.sin(np.deg2rad(bs.traf.hdg[ac_idx])) * ac_length)/max_distance)*self.window_width
+        self.projection.update_ref(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx])
+        canvas = self.pygame_canvas.begin_frame()
 
-        pygame.draw.line(canvas,
-            (0,0,0),
-            (self.window_width/2,self.window_height/2),
-            ((self.window_width/2)+heading_end_x,(self.window_height/2)-heading_end_y),
-            width = 4
-        )
+        draw_aircraft(canvas, *self.projection.center, bs.traf.hdg[ac_idx],
+                      body_km=8, heading_km=50, projection=self.projection)
 
-        # draw heading line
-        heading_length = 50
-        heading_end_x = ((np.cos(np.deg2rad(bs.traf.hdg[ac_idx])) * heading_length)/max_distance)*self.window_width
-        heading_end_y = ((np.sin(np.deg2rad(bs.traf.hdg[ac_idx])) * heading_length)/max_distance)*self.window_width
+        for lat, lon, reached in zip(self.wpt_lat, self.wpt_lon, self.wpt_reach):
+            x, y = self.projection.project(lat, lon)
+            draw_waypoint(canvas, x, y, DISTANCE_MARGIN, self.projection,
+                          reached=bool(reached))
 
-        pygame.draw.line(canvas,
-            (0,0,0),
-            (self.window_width/2,self.window_height/2),
-            ((self.window_width/2)+heading_end_x,(self.window_height/2)-heading_end_y),
-            width = 1
-        )
-
-        # draw target waypoint
-        for qdr, dis, reach in zip(self.wpt_qdr, self.wpt_dis, self.wpt_reach):
-
-            circle_x = ((np.cos(np.deg2rad(qdr)) * dis)/max_distance)*self.window_width
-            circle_y = ((np.sin(np.deg2rad(qdr)) * dis)/max_distance)*self.window_width
-
-            if reach:
-                color = (155,155,155)
-            else:
-                color = (255,255,255)
-
-            pygame.draw.circle(
-                canvas, 
-                color,
-                ((self.window_width/2)+circle_x,(self.window_height/2)-circle_y),
-                radius = 4,
-                width = 0
-            )
-            
-            pygame.draw.circle(
-                canvas, 
-                color,
-                ((self.window_width/2)+circle_x,(self.window_height/2)-circle_y),
-                radius = (DISTANCE_MARGIN/max_distance)*self.window_width,
-                width = 2
-            )
-
-        self.window.blit(canvas, canvas.get_rect())
-        pygame.display.update()
-        self.clock.tick(self.metadata["render_fps"])
+        self.pygame_canvas.end_frame(canvas)
         
     def close(self):
         bs.stack.stack('quit')
