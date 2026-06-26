@@ -1,7 +1,5 @@
 
 import numpy as np
-import pygame
-
 import bluesky as bs
 import bluesky_gym.envs.common.functions as fn
 
@@ -9,6 +7,10 @@ import gymnasium as gym
 from gymnasium import spaces
 
 from core.observations import IntruderObservation, WaypointObservation
+from core.rendering import (
+    PygameCanvas, TopDownProjection,
+    draw_aircraft, draw_intruder, draw_waypoint,
+)
 
 DISTANCE_MARGIN = 5 # km
 REACH_REWARD = 1
@@ -73,8 +75,11 @@ class HorizontalCREnv(gym.Env):
         self.total_intrusions = 0
         self.average_drift = np.array([])
 
-        self.window = None
-        self.clock = None
+        self.pygame_canvas = PygameCanvas(self.window_width, self.window_height)
+        self.projection = TopDownProjection(
+            max_distance=200, viewport=(0, 0, self.window_width, self.window_height),
+            ref_lat=0, ref_lon=0,
+        )
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -85,7 +90,7 @@ class HorizontalCREnv(gym.Env):
         self.total_intrusions = 0
         self.average_drift = np.array([])
 
-        bs.traf.cre(self.agent,actype="A320",acspd=AC_SPD)
+        bs.traf.cre(self.agent,actype="A320",acspd=AC_SPD,achdg=90)
 
         self._generate_conflicts()
         self._generate_waypoint()
@@ -135,7 +140,7 @@ class HorizontalCREnv(gym.Env):
         self.wpt_reach = []
         for i in range(NUM_WAYPOINTS):
             wpt_dis_init = np.random.randint(WAYPOINT_DISTANCE_MIN, WAYPOINT_DISTANCE_MAX)
-            wpt_hdg_init = 0
+            wpt_hdg_init = 90
 
             ac_idx = bs.traf.id2idx(acid)
 
@@ -226,124 +231,30 @@ class HorizontalCREnv(gym.Env):
         bs.stack.stack(f"HDG KL001 {action[0]}")
 
     def _render_frame(self):
-        if self.window is None and self.render_mode == "human":
-            pygame.init()
-            pygame.display.init()
-            self.window = pygame.display.set_mode(self.window_size)
-
-        if self.clock is None and self.render_mode == "human":
-            self.clock = pygame.time.Clock()
-
-        max_distance = 200 # width of screen in km
-
-        canvas = pygame.Surface(self.window_size)
-        canvas.fill((135,206,235))
-
-        # draw ownship
         ac_idx = bs.traf.id2idx('KL001')
-        ac_length = 8
-        heading_end_x = ((np.cos(np.deg2rad(bs.traf.hdg[ac_idx])) * ac_length)/max_distance)*self.window_width
-        heading_end_y = ((np.sin(np.deg2rad(bs.traf.hdg[ac_idx])) * ac_length)/max_distance)*self.window_width
+        self.projection.update_ref(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx])
+        canvas = self.pygame_canvas.begin_frame()
 
-        pygame.draw.line(canvas,
-            (0,0,0),
-            (self.window_width/2-heading_end_x/2,self.window_height/2+heading_end_y/2),
-            ((self.window_width/2)+heading_end_x/2,(self.window_height/2)-heading_end_y/2),
-            width = 4
-        )
-
-        # draw heading line
-        heading_length = 50
-        heading_end_x = ((np.cos(np.deg2rad(bs.traf.hdg[ac_idx])) * heading_length)/max_distance)*self.window_width
-        heading_end_y = ((np.sin(np.deg2rad(bs.traf.hdg[ac_idx])) * heading_length)/max_distance)*self.window_width
-
-        pygame.draw.line(canvas,
-            (0,0,0),
-            (self.window_width/2,self.window_height/2),
-            ((self.window_width/2)+heading_end_x,(self.window_height/2)-heading_end_y),
-            width = 1
-        )
-
-        # draw intruders
-        ac_length = 3
+        draw_aircraft(canvas, *self.projection.center, bs.traf.hdg[ac_idx],
+                      body_km=8, heading_km=50, projection=self.projection)
 
         for i in range(NUM_INTRUDERS):
-            int_idx = i+1
-            int_hdg = bs.traf.hdg[int_idx]
-            heading_end_x = ((np.cos(np.deg2rad(int_hdg)) * ac_length)/max_distance)*self.window_width
-            heading_end_y = ((np.sin(np.deg2rad(int_hdg)) * ac_length)/max_distance)*self.window_width
+            int_idx = i + 1
+            x, y = self.projection.project(bs.traf.lat[int_idx], bs.traf.lon[int_idx])
+            int_dis = bs.tools.geo.kwikdist(
+                bs.traf.lat[ac_idx], bs.traf.lon[ac_idx],
+                bs.traf.lat[int_idx], bs.traf.lon[int_idx])
+            draw_intruder(canvas, x, y, bs.traf.hdg[int_idx], self.projection,
+                          body_km=3, heading_km=10,
+                          safety_radius_km=INTRUSION_DISTANCE * NM2KM,
+                          in_intrusion=int_dis < INTRUSION_DISTANCE)
 
-            int_qdr, int_dis = bs.tools.geo.kwikqdrdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], bs.traf.lat[int_idx], bs.traf.lon[int_idx])
+        for lat, lon, reached in zip(self.wpt_lat, self.wpt_lon, self.wpt_reach):
+            x, y = self.projection.project(lat, lon)
+            draw_waypoint(canvas, x, y, DISTANCE_MARGIN, self.projection,
+                          reached=bool(reached))
 
-            # determine color
-            if int_dis < INTRUSION_DISTANCE:
-                color = (220,20,60)
-            else: 
-                color = (80,80,80)
-
-            x_pos = (self.window_width/2)+(np.cos(np.deg2rad(int_qdr))*(int_dis * NM2KM)/max_distance)*self.window_width
-            y_pos = (self.window_height/2)-(np.sin(np.deg2rad(int_qdr))*(int_dis * NM2KM)/max_distance)*self.window_height
-
-            pygame.draw.line(canvas,
-                color,
-                (x_pos,y_pos),
-                ((x_pos)+heading_end_x,(y_pos)-heading_end_y),
-                width = 4
-            )
-
-            # draw heading line
-            heading_length = 10
-            heading_end_x = ((np.cos(np.deg2rad(int_hdg)) * heading_length)/max_distance)*self.window_width
-            heading_end_y = ((np.sin(np.deg2rad(int_hdg)) * heading_length)/max_distance)*self.window_width
-
-            pygame.draw.line(canvas,
-                color,
-                (x_pos,y_pos),
-                ((x_pos)+heading_end_x,(y_pos)-heading_end_y),
-                width = 1
-            )
-
-            pygame.draw.circle(
-                canvas, 
-                color,
-                (x_pos,y_pos),
-                radius = (INTRUSION_DISTANCE*NM2KM/max_distance)*self.window_width,
-                width = 2
-            )
-
-            # import code
-            # code.interact(local=locals())
-
-        # draw target waypoint
-        for qdr, dis, reach in zip(self.wpt_qdr, self.waypoint_distance, self.wpt_reach):
-
-            circle_x = ((np.cos(np.deg2rad(qdr)) * dis)/max_distance)*self.window_width
-            circle_y = ((np.sin(np.deg2rad(qdr)) * dis)/max_distance)*self.window_width
-
-            if reach:
-                color = (155,155,155)
-            else:
-                color = (255,255,255)
-
-            pygame.draw.circle(
-                canvas, 
-                color,
-                ((self.window_width/2)+circle_x,(self.window_height/2)-circle_y),
-                radius = 4,
-                width = 0
-            )
-            
-            pygame.draw.circle(
-                canvas, 
-                color,
-                ((self.window_width/2)+circle_x,(self.window_height/2)-circle_y),
-                radius = (DISTANCE_MARGIN/max_distance)*self.window_width,
-                width = 2
-            )
-
-        self.window.blit(canvas, canvas.get_rect())
-        pygame.display.update()
-        self.clock.tick(self.metadata["render_fps"])
+        self.pygame_canvas.end_frame(canvas)
         
     def close(self):
         bs.stack.stack('quit')
