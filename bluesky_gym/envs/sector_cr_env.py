@@ -1,6 +1,4 @@
 import numpy as np
-import pygame
-
 import bluesky as bs
 import bluesky_gym.envs.common.functions as fn
 
@@ -8,6 +6,10 @@ import gymnasium as gym
 from gymnasium import spaces
 
 from core.observations import DriftObservation, OwnAirspeedObservation, IntruderObservation
+from core.rendering import (
+    PygameCanvas, TopDownProjection,
+    draw_aircraft, draw_intruder, draw_polygon,
+)
 
 AC_DENSITY_RANGE = (0.003, 0.007) # In AC/NM^2
 AC_DENSITY_MU = 0.003 # In AC/NM^2
@@ -61,7 +63,7 @@ class SectorCREnv(gym.Env):
 
         self.agent = "KL001"
 
-        self.action_space = spaces.Box(-1, 1, shape=(1,), dtype=np.float64)
+        self.action_space = spaces.Box(-1, 1, shape=(2,), dtype=np.float64)
 
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
@@ -78,8 +80,11 @@ class SectorCREnv(gym.Env):
         self.total_intrusions = 0
         self.average_drift = np.array([])
 
-        self.window = None
-        self.clock = None
+        self.pygame_canvas = PygameCanvas(self.window_width, self.window_height)
+        self.projection = TopDownProjection(
+            max_distance=200, viewport=(0, 0, self.window_width, self.window_height),
+            ref_lat=CENTER[0], ref_lon=CENTER[1],
+        )
     
     def reset(self, seed=None, options=None):
         bs.traf.reset()
@@ -91,6 +96,16 @@ class SectorCREnv(gym.Env):
         self.average_drift = np.array([])
        
         self._generate_polygon() # Create airspace polygon
+
+        max_distance = max(
+            np.linalg.norm(p1 - p2)
+            for p1 in self.poly_points for p2 in self.poly_points
+        ) * NM2KM
+        self.projection = TopDownProjection(
+            max_distance=max_distance,
+            viewport=(0, 0, self.window_width, self.window_height),
+            ref_lat=CENTER[0], ref_lon=CENTER[1],
+        )
         
         if self.density_mode == "normal":
             rand_density = np.random.normal(AC_DENSITY_MU, AC_DENSITY_SIGMA)
@@ -246,12 +261,12 @@ class SectorCREnv(gym.Env):
         }
     
     def _get_action(self, action):
-        # dh = action[0] * D_HEADING
-        dv = action[0] * D_VELOCITY
-        # heading_new = fn.bound_angle_positive_negative_180(bs.traf.hdg[bs.traf.id2idx(self.agent)] + dh)
+        dh = action[0] * D_HEADING
+        dv = action[1] * D_VELOCITY
+        heading_new = fn.bound_angle_positive_negative_180(bs.traf.hdg[bs.traf.id2idx(self.agent)] + dh)
         speed_new = (bs.traf.cas[bs.traf.id2idx(self.agent)] + dv) * MpS2Kt
 
-        # bs.stack.stack(f"HDG {self.agent} {heading_new}")
+        bs.stack.stack(f"HDG {self.agent} {heading_new}")
         bs.stack.stack(f"SPD {self.agent} {speed_new}")
 
     def _check_drift(self):
@@ -272,107 +287,34 @@ class SectorCREnv(gym.Env):
         return reward
         
     def _render_frame(self):
-        if self.window is None and self.render_mode == "human":
-            pygame.init()
-            pygame.display.init()
-            self.window = pygame.display.set_mode(self.window_size)
+        ac_idx = bs.traf.id2idx(self.agent)
+        canvas = self.pygame_canvas.begin_frame()
 
-        if self.clock is None and self.render_mode == "human":
-            self.clock = pygame.time.Clock()
-
-        max_distance = max(np.linalg.norm(point1 - point2) for point1 in self.poly_points for point2 in self.poly_points)*NM2KM
-        
-        px_per_km = self.window_width/max_distance
-
-        canvas = pygame.Surface(self.window_size)
-        canvas.fill((135,206,235))
-        
-        # Draw airspace
-        airspace_color = (255, 0, 0)
-        coords = [((self.window_width/2)+point[0]*NM2KM*px_per_km, (self.window_height/2)-point[1]*NM2KM*px_per_km) for point in self.poly_points]
-        pygame.draw.polygon(canvas, airspace_color, coords, width=2)
+        # Draw airspace polygon
+        poly_coords = [
+            self.projection.project(*fn.nm_to_latlong(CENTER, pt))
+            for pt in self.poly_points
+        ]
+        draw_polygon(canvas, poly_coords, color=(255, 0, 0), filled=False, width=2)
 
         # Draw ownship
-        ac_idx = bs.traf.id2idx(self.agent)
-        ac_length = 10
-        ac_hdg = bs.traf.hdg[ac_idx]
-        heading_end_x = np.cos(np.deg2rad(ac_hdg)) * ac_length
-        heading_end_y = np.sin(np.deg2rad(ac_hdg)) * ac_length
-        ac_qdr, ac_dis = bs.tools.geo.kwikqdrdist(CENTER[0], CENTER[1], bs.traf.lat[ac_idx], bs.traf.lon[ac_idx])
-
-        x_pos = (self.window_width/2)+(np.cos(np.deg2rad(ac_qdr))*(ac_dis * NM2KM)*px_per_km)
-        y_pos = (self.window_height/2)-(np.sin(np.deg2rad(ac_qdr))*(ac_dis * NM2KM)*px_per_km)
-
-        pygame.draw.line(canvas,
-            (0,0,0),
-            (x_pos,y_pos),
-            ((x_pos)+heading_end_x,(y_pos)-heading_end_y),
-            width = 4
-        )
-
-        # Draw heading line
-        heading_length = 20
-        heading_end_x = np.cos(np.deg2rad(ac_hdg)) * heading_length
-        heading_end_y = np.sin(np.deg2rad(ac_hdg)) * heading_length
-
-        pygame.draw.line(canvas,
-                (0,0,0),
-                (x_pos,y_pos),
-                ((x_pos)+heading_end_x,(y_pos)-heading_end_y),
-                width = 1
-        )
+        x, y = self.projection.project(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx])
+        draw_aircraft(canvas, x, y, bs.traf.hdg[ac_idx],
+                      body_km=3, heading_km=10, projection=self.projection)
 
         # Draw intruders
-        ac_length = 3
+        for i in range(self.num_ac - 1):
+            int_idx = i + 1
+            ix, iy = self.projection.project(bs.traf.lat[int_idx], bs.traf.lon[int_idx])
+            separation = bs.tools.geo.kwikdist(
+                bs.traf.lat[ac_idx], bs.traf.lon[ac_idx],
+                bs.traf.lat[int_idx], bs.traf.lon[int_idx])
+            draw_intruder(canvas, ix, iy, bs.traf.hdg[int_idx], self.projection,
+                          body_km=2, heading_km=5,
+                          safety_radius_km=INTRUSION_DISTANCE * NM2KM,
+                          in_intrusion=separation < INTRUSION_DISTANCE)
 
-        for i in range(self.num_ac-1):
-            int_idx = i+1
-            int_hdg = bs.traf.hdg[int_idx]
-            heading_end_x = np.cos(np.deg2rad(int_hdg)) * ac_length
-            heading_end_y = np.sin(np.deg2rad(int_hdg)) * ac_length
-
-            int_qdr, int_dis = bs.tools.geo.kwikqdrdist(CENTER[0], CENTER[1], bs.traf.lat[int_idx], bs.traf.lon[int_idx])
-            separation = bs.tools.geo.kwikdist(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], bs.traf.lat[int_idx], bs.traf.lon[int_idx])
-
-            # Determine color
-            if separation < INTRUSION_DISTANCE:
-                color = (220,20,60)
-            else: 
-                color = (80,80,80)
-
-            x_pos = (self.window_width/2)+(np.cos(np.deg2rad(int_qdr))*(int_dis * NM2KM)*px_per_km)
-            y_pos = (self.window_height/2)-(np.sin(np.deg2rad(int_qdr))*(int_dis * NM2KM)*px_per_km)
-
-            pygame.draw.line(canvas,
-                color,
-                (x_pos,y_pos),
-                ((x_pos)+heading_end_x,(y_pos)-heading_end_y),
-                width = 4
-            )
-
-            # Draw heading line
-            heading_length = 20
-            heading_end_x = np.cos(np.deg2rad(int_hdg)) * heading_length
-            heading_end_y = np.sin(np.deg2rad(int_hdg)) * heading_length
-
-            pygame.draw.line(canvas,
-                color,
-                (x_pos,y_pos),
-                ((x_pos)+heading_end_x,(y_pos)-heading_end_y),
-                width = 1
-            )
-
-            pygame.draw.circle(
-                canvas, 
-                color,
-                (x_pos,y_pos),
-                radius = INTRUSION_DISTANCE*NM2KM*px_per_km,
-                width = 2
-            )
-
-        self.window.blit(canvas, canvas.get_rect())
-        pygame.display.update()
-        self.clock.tick(self.metadata["render_fps"])
+        self.pygame_canvas.end_frame(canvas)
     
     def close(self):
         bs.stack.stack('quit')
