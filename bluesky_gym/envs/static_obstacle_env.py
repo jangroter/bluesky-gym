@@ -1,6 +1,4 @@
 import numpy as np
-import pygame
-
 import bluesky as bs
 import bluesky_gym.envs.common.functions as fn
 
@@ -8,6 +6,10 @@ import gymnasium as gym
 from gymnasium import spaces
 
 from core.observations import WaypointObservation, ObstacleObservation
+from core.rendering import (
+    PygameCanvas, TopDownProjection,
+    draw_aircraft, draw_waypoint, draw_polygon, RED_ORANGE,
+)
 
 DISTANCE_MARGIN = 5 # km
 
@@ -88,8 +90,12 @@ class StaticObstacleEnv(gym.Env):
 
         self.obstacle_names = []
 
-        self.window = None
-        self.clock = None
+        self.pygame_canvas = PygameCanvas(self.window_width, self.window_height)
+        self.projection = TopDownProjection(
+            max_distance=MAX_DISTANCE,
+            viewport=(0, 0, self.window_width, self.window_height),
+            ref_lat=0, ref_lon=0,
+        )
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed) 
@@ -103,14 +109,8 @@ class StaticObstacleEnv(gym.Env):
 
         bs.traf.cre(self.agent,actype="A320",acspd=AC_SPD, acalt=ALTITUDE)
 
-        # defining screen coordinates
-        # defining the reference point as the top left corner of the SQUARE screen
-        # from the initial position of the aircraft which is set to be the centre of the screen
         ac_idx = bs.traf.id2idx(self.agent)
-        d = np.sqrt(2*(MAX_DISTANCE/2)**2) #KM
-        lat_ref_point,lon_ref_point = bs.tools.geo.kwikpos(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx], 315, d/NM2KM)
-        
-        self.screen_coords = [lat_ref_point,lon_ref_point]#[52.9, 2.6]
+        self.projection.update_ref(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx])
 
         self._generate_obstacles()
         self._generate_waypoint()
@@ -307,99 +307,27 @@ class StaticObstacleEnv(gym.Env):
         bs.stack.stack(f"SPD {self.agent} {speed_new}")
 
     def _render_frame(self):
-        if self.window is None and self.render_mode == "human":
-            pygame.init()
-            pygame.display.init()
-            self.window = pygame.display.set_mode(self.window_size)
-            
-
-        if self.clock is None and self.render_mode == "human":
-            self.clock = pygame.time.Clock()
-
-        screen_coords = self.screen_coords
-
-        canvas = pygame.Surface(self.window_size)
-        canvas.fill((135,206,235))
-
-        px_per_km = self.window_width/MAX_DISTANCE
-
-        # draw ownship
         ac_idx = bs.traf.id2idx(self.agent)
-        ac_length = 8
-        heading_end_x = ((np.sin(np.deg2rad(bs.traf.hdg[ac_idx])) * ac_length)/MAX_DISTANCE)*self.window_width
-        heading_end_y = ((np.cos(np.deg2rad(bs.traf.hdg[ac_idx])) * ac_length)/MAX_DISTANCE)*self.window_width
+        canvas = self.pygame_canvas.begin_frame()
 
-        qdr, dis = bs.tools.geo.kwikqdrdist(screen_coords[0], screen_coords[1], bs.traf.lat[ac_idx], bs.traf.lon[ac_idx])
-        dis = dis*NM2KM
-        x_actor = ((np.sin(np.deg2rad(qdr))*dis)/MAX_DISTANCE)*self.window_width
-        y_actor = ((-np.cos(np.deg2rad(qdr))*dis)/MAX_DISTANCE)*self.window_width
-        pygame.draw.line(canvas,
-            (235, 52, 52),
-            (x_actor, y_actor),
-            (x_actor+heading_end_x, y_actor-heading_end_y),
-            width = 5
-        )
+        # Draw ownship
+        x, y = self.projection.project(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx])
+        draw_aircraft(canvas, x, y, bs.traf.hdg[ac_idx],
+                      body_km=8, heading_km=50, projection=self.projection,
+                      color=RED_ORANGE, body_width=5)
 
-        # draw heading line
-        heading_length = 50
-        heading_end_x = ((np.sin(np.deg2rad(bs.traf.hdg[ac_idx])) * heading_length)/MAX_DISTANCE)*self.window_width
-        heading_end_y = ((np.cos(np.deg2rad(bs.traf.hdg[ac_idx])) * heading_length)/MAX_DISTANCE)*self.window_width
-
-        pygame.draw.line(canvas,
-            (0,0,0),
-            (x_actor,y_actor),
-            (x_actor+heading_end_x, y_actor-heading_end_y),
-            width = 1
-        )
-
-        # draw obstacles
+        # Draw obstacles
         for vertices in self.obstacle_vertices:
-            points = []
-            for coord in vertices:
-                lat_ref = coord[0]
-                lon_ref = coord[1]
-                qdr, dis = bs.tools.geo.kwikqdrdist(screen_coords[0], screen_coords[1], lat_ref, lon_ref)
-                dis = dis*NM2KM
-                x_ref = (np.sin(np.deg2rad(qdr))*dis)/MAX_DISTANCE*self.window_width
-                y_ref = (-np.cos(np.deg2rad(qdr))*dis)/MAX_DISTANCE*self.window_width
-                points.append((x_ref, y_ref))
-            pygame.draw.polygon(canvas,
-                (0,0,0), points
-            )
+            points = [self.projection.project(v[0], v[1]) for v in vertices]
+            draw_polygon(canvas, points)
 
-        # draw target waypoint
-        indx = 0
-        for lat, lon, reach in zip(self.wpt_lat, self.wpt_lon, self.wpt_reach):
-            
-            indx += 1
-            qdr, dis = bs.tools.geo.kwikqdrdist(screen_coords[0], screen_coords[1], lat, lon)
+        # Draw waypoints
+        for lat, lon, reached in zip(self.wpt_lat, self.wpt_lon, self.wpt_reach):
+            wx, wy = self.projection.project(lat, lon)
+            draw_waypoint(canvas, wx, wy, DISTANCE_MARGIN, self.projection,
+                          reached=bool(reached))
 
-            circle_x = ((np.sin(np.deg2rad(qdr)) * dis * NM2KM)/MAX_DISTANCE)*self.window_width
-            circle_y = (-(np.cos(np.deg2rad(qdr)) * dis * NM2KM)/MAX_DISTANCE)*self.window_width
-
-            color = (255,255,255)
-
-            pygame.draw.circle(
-                canvas, 
-                color,
-                (circle_x,circle_y),
-                radius = 4,
-                width = 0
-            )
-            
-            pygame.draw.circle(
-                canvas, 
-                color,
-                (circle_x,circle_y),
-                radius = (DISTANCE_MARGIN/MAX_DISTANCE)*self.window_width,
-                width = 2
-            )
-
-        self.window.blit(canvas, canvas.get_rect())
-        
-        pygame.display.update()
-        
-        self.clock.tick(self.metadata["render_fps"])
+        self.pygame_canvas.end_frame(canvas)
 
     def close(self):
         bs.stack.stack('quit')
