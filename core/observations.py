@@ -205,12 +205,63 @@ class IntruderObservation:
     sort_by : str or callable
         "distance", "tcpa", or "dcpa". Pass a callable with signature
         (ac_idx, other_idx) -> ordered list of indices for custom strategies.
+    frame : str
+        Reference frame used for all relative position and velocity outputs.
+
+        ``"body"`` — Ownship body frame (default).
+
+            All vectors are rotated so that the x-axis points along the
+            ownship nose and the y-axis points to the starboard (right) wing.
+
+            Aviation convention (heading measured clockwise from North) is
+            preserved throughout: a bearing of ``brg`` degrees from the
+            ownship maps to body-frame angle ``brg - own_hdg``.
+
+            Sign conventions::
+
+                +x  →  ahead of ownship (nose direction)
+                +y  →  right of ownship (starboard)
+
+            Rotation from global NE to body frame::
+
+                x =  north * cos(hdg) + east * sin(hdg)
+                y = -north * sin(hdg) + east * cos(hdg)
+
+            Equivalently for position: x = dist * cos(brg - hdg),
+                                       y = dist * sin(brg - hdg).
+
+            Observation keys: ``x_r``, ``y_r``, ``vx_r``, ``vy_r``.
+
+            Use this frame when the policy should be heading-invariant: the
+            same physical geometry always produces the same observation,
+            reducing the state space the agent must explore.
+
+        ``"global"`` — Fixed geographic North-East frame.
+
+            Vectors are expressed directly in the world frame; no heading
+            rotation is applied.  Both position and velocity use aviation
+            North-East decomposition::
+
+                north = dist * cos(brg)   /   vn = cos(hdg) * tas
+                east  = dist * sin(brg)   /   ve = sin(hdg) * tas
+
+            Sign conventions::
+
+                +north_r / +vn_r  →  geographic North
+                +east_r  / +ve_r  →  geographic East
+
+            Observation keys: ``north_r``, ``east_r``, ``vn_r``, ``ve_r``.
+
+            Use this frame when the policy also receives an explicit ownship
+            heading observation so it can reason about ego-relative geometry
+            from global coordinates.
+
     include_vertical : bool
         Adds altitude_difference and vz_difference when True.
     pos_norm : float
-        Normalization divisor for x_r, y_r (metres).
+        Normalization divisor for position components (metres).
     spd_norm : float
-        Normalization divisor for vx_r, vy_r (m/s).
+        Normalization divisor for velocity components (m/s).
     dist_norm : float
         Normalization divisor for intruder_distance (NM).
     alt_norm : float
@@ -224,7 +275,7 @@ class IntruderObservation:
         "dcpa": _sort_by_dcpa,
     }
 
-    def __init__(self, n=5, sort_by="distance", include_vertical=False,
+    def __init__(self, n=5, sort_by="distance", frame="body", include_vertical=False,
                  pos_norm=1_000_000, spd_norm=150, dist_norm=250, alt_norm=3000):
         if callable(sort_by):
             self._sorter = sort_by
@@ -232,7 +283,10 @@ class IntruderObservation:
             self._sorter = self.SORTERS[sort_by]
         else:
             raise ValueError(f"unknown sort_by: {sort_by!r}, choices: {list(self.SORTERS)}")
+        if frame not in ("body", "global"):
+            raise ValueError(f"unknown frame: {frame!r}, choices: ('body', 'global')")
         self.n = n
+        self.frame = frame
         self.include_vertical = include_vertical
         self.pos_norm = pos_norm
         self.spd_norm = spd_norm
@@ -241,11 +295,22 @@ class IntruderObservation:
 
     def space(self):
         shape = (self.n,)
+        if self.frame == "body":
+            pos_vel = {
+                "x_r": spaces.Box(-np.inf, np.inf, shape=shape, dtype=np.float64),
+                "y_r": spaces.Box(-np.inf, np.inf, shape=shape, dtype=np.float64),
+                "vx_r": spaces.Box(-np.inf, np.inf, shape=shape, dtype=np.float64),
+                "vy_r": spaces.Box(-np.inf, np.inf, shape=shape, dtype=np.float64),
+            }
+        else:
+            pos_vel = {
+                "north_r": spaces.Box(-np.inf, np.inf, shape=shape, dtype=np.float64),
+                "east_r": spaces.Box(-np.inf, np.inf, shape=shape, dtype=np.float64),
+                "vn_r": spaces.Box(-np.inf, np.inf, shape=shape, dtype=np.float64),
+                "ve_r": spaces.Box(-np.inf, np.inf, shape=shape, dtype=np.float64),
+            }
         s = {
-            "x_r": spaces.Box(-np.inf, np.inf, shape=shape, dtype=np.float64),
-            "y_r": spaces.Box(-np.inf, np.inf, shape=shape, dtype=np.float64),
-            "vx_r": spaces.Box(-np.inf, np.inf, shape=shape, dtype=np.float64),
-            "vy_r": spaces.Box(-np.inf, np.inf, shape=shape, dtype=np.float64),
+            **pos_vel,
             "cos_track": spaces.Box(-1.0, 1.0, shape=shape, dtype=np.float64),
             "sin_track": spaces.Box(-1.0, 1.0, shape=shape, dtype=np.float64),
             "intruder_distance": spaces.Box(-np.inf, np.inf, shape=shape, dtype=np.float64),
@@ -262,16 +327,18 @@ class IntruderObservation:
         own_lon = bs.traf.lon[ac_idx]
         own_hdg = bs.traf.hdg[ac_idx]
         own_tas = bs.traf.tas[ac_idx]
-        vx_own = np.cos(np.deg2rad(own_hdg)) * own_tas
-        vy_own = np.sin(np.deg2rad(own_hdg)) * own_tas
+        own_hdg_rad = np.deg2rad(own_hdg)
+        # Ownship velocity in global NE frame
+        vn_own = np.cos(own_hdg_rad) * own_tas
+        ve_own = np.sin(own_hdg_rad) * own_tas
 
         other_idx = [i for i in range(bs.traf.ntraf) if i != ac_idx]
         order = self._sorter(ac_idx, other_idx)[:self.n]
 
-        x_r = np.zeros(self.n)
-        y_r = np.zeros(self.n)
-        vx_r = np.zeros(self.n)
-        vy_r = np.zeros(self.n)
+        pos1 = np.zeros(self.n)
+        pos2 = np.zeros(self.n)
+        vel1 = np.zeros(self.n)
+        vel2 = np.zeros(self.n)
         cos_track = np.zeros(self.n)
         sin_track = np.zeros(self.n)
         distances = np.zeros(self.n)
@@ -282,15 +349,31 @@ class IntruderObservation:
             brg, dist = bs.tools.geo.kwikqdrdist(own_lat, own_lon, bs.traf.lat[i], bs.traf.lon[i])
             dist_m = dist * NM2KM * 1000
 
-            x_r[slot] = dist_m * np.cos(np.deg2rad(brg))
-            y_r[slot] = dist_m * np.sin(np.deg2rad(brg))
+            # Intruder velocity in global NE frame
+            int_hdg_rad = np.deg2rad(bs.traf.hdg[i])
+            vn_int = np.cos(int_hdg_rad) * bs.traf.tas[i]
+            ve_int = np.sin(int_hdg_rad) * bs.traf.tas[i]
 
-            vx_int = np.cos(np.deg2rad(bs.traf.hdg[i])) * bs.traf.tas[i]
-            vy_int = np.sin(np.deg2rad(bs.traf.hdg[i])) * bs.traf.tas[i]
-            vx_r[slot] = vx_int - vx_own
-            vy_r[slot] = vy_int - vy_own
+            # Relative velocity in global NE frame
+            vn_r = vn_int - vn_own
+            ve_r = ve_int - ve_own
 
-            track = np.arctan2(vy_r[slot], vx_r[slot])
+            if self.frame == "body":
+                # Rotate position into body frame: x=nose, y=starboard
+                rel_rad = np.deg2rad(brg - own_hdg)
+                pos1[slot] = dist_m * np.cos(rel_rad)
+                pos2[slot] = dist_m * np.sin(rel_rad)
+                # Rotate velocity into body frame
+                vel1[slot] =  vn_r * np.cos(own_hdg_rad) + ve_r * np.sin(own_hdg_rad)
+                vel2[slot] = -vn_r * np.sin(own_hdg_rad) + ve_r * np.cos(own_hdg_rad)
+            else:
+                # Global NE frame: north = cos(brg), east = sin(brg)
+                pos1[slot] = dist_m * np.cos(np.deg2rad(brg))
+                pos2[slot] = dist_m * np.sin(np.deg2rad(brg))
+                vel1[slot] = vn_r
+                vel2[slot] = ve_r
+
+            track = np.arctan2(vel2[slot], vel1[slot])
             cos_track[slot] = np.cos(track)
             sin_track[slot] = np.sin(track)
             distances[slot] = dist
@@ -299,11 +382,23 @@ class IntruderObservation:
                 alt_diff[slot] = bs.traf.alt[i] - bs.traf.alt[ac_idx]
                 vz_diff[slot] = bs.traf.vs[i] - bs.traf.vs[ac_idx]
 
+        if self.frame == "body":
+            pos_vel = {
+                "x_r": pos1 / self.pos_norm,
+                "y_r": pos2 / self.pos_norm,
+                "vx_r": vel1 / self.spd_norm,
+                "vy_r": vel2 / self.spd_norm,
+            }
+        else:
+            pos_vel = {
+                "north_r": pos1 / self.pos_norm,
+                "east_r": pos2 / self.pos_norm,
+                "vn_r": vel1 / self.spd_norm,
+                "ve_r": vel2 / self.spd_norm,
+            }
+
         obs = {
-            "x_r": x_r / self.pos_norm,
-            "y_r": y_r / self.pos_norm,
-            "vx_r": vx_r / self.spd_norm,
-            "vy_r": vy_r / self.spd_norm,
+            **pos_vel,
             "cos_track": cos_track,
             "sin_track": sin_track,
             "intruder_distance": distances / self.dist_norm,

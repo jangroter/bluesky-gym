@@ -53,7 +53,7 @@ class SectorCREnv(gym.Env):
 
         self.drift_obs = DriftObservation()
         self.airspeed_obs = OwnAirspeedObservation(spd_mean=AC_SPD, spd_std=6.0)
-        self.intruder_obs = IntruderObservation(n=NUM_AC_STATE, sort_by="distance")
+        self.intruder_obs = IntruderObservation(n=NUM_AC_STATE, sort_by="distance", frame="body")
 
         self.observation_space = spaces.Dict({
             **self.drift_obs.space(),
