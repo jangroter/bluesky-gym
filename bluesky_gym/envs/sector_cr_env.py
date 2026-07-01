@@ -51,7 +51,7 @@ class SectorCREnv(gym.Env):
 
         self.drift_obs = DriftObservation()
         self.airspeed_obs = OwnAirspeedObservation(spd_mean=AC_SPD, spd_std=6.0)
-        self.intruder_obs = IntruderObservation(n=NUM_AC_STATE, sort_by="distance")
+        self.intruder_obs = IntruderObservation(n=NUM_AC_STATE, sort_by="distance", frame="body")
 
         self.observation_space = spaces.Dict({
             **self.drift_obs.space(),
@@ -61,7 +61,7 @@ class SectorCREnv(gym.Env):
 
         self.agent = "KL001"
 
-        self.action_space = spaces.Box(-1, 1, shape=(1,), dtype=np.float64)
+        self.action_space = spaces.Box(-1, 1, shape=(2,), dtype=np.float64)
 
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
@@ -246,12 +246,12 @@ class SectorCREnv(gym.Env):
         }
     
     def _get_action(self, action):
-        # dh = action[0] * D_HEADING
-        dv = action[0] * D_VELOCITY
-        # heading_new = fn.bound_angle_positive_negative_180(bs.traf.hdg[bs.traf.id2idx(self.agent)] + dh)
+        dh = action[0] * D_HEADING
+        dv = action[1] * D_VELOCITY
+        heading_new = fn.bound_angle_positive_negative_180(bs.traf.hdg[bs.traf.id2idx(self.agent)] + dh)
         speed_new = (bs.traf.cas[bs.traf.id2idx(self.agent)] + dv) * MpS2Kt
 
-        # bs.stack.stack(f"HDG {self.agent} {heading_new}")
+        bs.stack.stack(f"HDG {self.agent} {heading_new}")
         bs.stack.stack(f"SPD {self.agent} {speed_new}")
 
     def _check_drift(self):
