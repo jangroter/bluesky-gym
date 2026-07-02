@@ -14,6 +14,7 @@ from core.rendering import (
     draw_aircraft, draw_intruder,
     draw_side_aircraft, draw_side_intruder, draw_ground, draw_runway, draw_target_altitude,
 )
+from core.actions import VerticalSpeedAction
 
 
 DISTANCE_MARGIN = 5 # km
@@ -88,7 +89,8 @@ class VerticalCREnv(gym.Env):
             **self.intruder_obs.space(),
         })
        
-        self.action_space = spaces.Box(-1, 1, shape=(1,), dtype=np.float64)
+        self.vertical_action = VerticalSpeedAction(vs_scale=ACTION_2_MS)
+        self.action_space = self.vertical_action.space()
 
         self.agent = "KL001"
 
@@ -209,21 +211,8 @@ class VerticalCREnv(gym.Env):
                 reward += INTRUSION_PENALTY
         return reward
         
-    def _get_action(self,action):
-        # Transform action to the meters per second
-        action = action * ACTION_2_MS
-
-        # Bluesky interpretes vertical velocity command through altitude commands 
-        # with a vertical speed (magnitude). So check sign of action and give arbitrary 
-        # altitude command
-
-        # The actions are then executed through stack commands;
-        if action >= 0:
-            bs.traf.selalt[0] = 1000000 # High target altitude to start climb
-            bs.traf.selvs[0] = action
-        elif action < 0:
-            bs.traf.selalt[0] = 0 # High target altitude to start descent
-            bs.traf.selvs[0] = action
+    def _get_action(self, action):
+        self.vertical_action.execute(self.agent, action)
 
     def reset(self, seed=None, options=None):
         

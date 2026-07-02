@@ -9,6 +9,7 @@ from core.rendering import (
     PygameCanvas, SideProfileProjection,
     draw_side_aircraft, draw_ground, draw_runway, draw_target_altitude,
 )
+from core.actions import VerticalSpeedAction
 
 ACTION_2_MS = 12.5
 
@@ -56,8 +57,9 @@ class DescentEnv(gym.Env):
         })
 
         self.agent = "KL001"
-       
-        self.action_space = spaces.Box(-1, 1, shape=(1,), dtype=np.float64)
+
+        self.vertical_action = VerticalSpeedAction(vs_scale=ACTION_2_MS)
+        self.action_space = self.vertical_action.space()
 
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
@@ -117,21 +119,8 @@ class DescentEnv(gym.Env):
             self.total_reward += reward
             return reward, 1
         
-    def _get_action(self,action):
-        # Transform action to the meters per second
-        action = action * ACTION_2_MS
-
-        # Bluesky interpretes vertical velocity command through altitude commands 
-        # with a vertical speed (magnitude). So check sign of action and give arbitrary 
-        # altitude command
-
-        # The actions are then executed through stack commands;
-        if action >= 0:
-            bs.traf.selalt[0] = 1000000 # High target altitude to start climb
-            bs.traf.selvs[0] = action
-        elif action < 0:
-            bs.traf.selalt[0] = 0 # High target altitude to start descent
-            bs.traf.selvs[0] = action
+    def _get_action(self, action):
+        self.vertical_action.execute(self.agent, action)
 
     def reset(self, seed=None, options=None):
         
@@ -157,7 +146,7 @@ class DescentEnv(gym.Env):
     
     def step(self, action):
         
-        self._get_action(action[0])
+        self._get_action(action)
 
         action_frequency = ACTION_FREQUENCY
         for i in range(action_frequency):
