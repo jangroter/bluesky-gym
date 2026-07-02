@@ -56,7 +56,9 @@ class PlanWaypointEnv(gym.Env):
         self.observation_space = spaces.Dict({
             **self.waypoint_obs.space(),
         })
-       
+
+        self.agent = "KL001"
+
         self.heading_action = HeadingAction(d_heading=D_HEADING)
         self.action_space = self.heading_action.space()
 
@@ -82,7 +84,7 @@ class PlanWaypointEnv(gym.Env):
 
 
     def _get_obs(self):
-        ac_idx = bs.traf.id2idx('KL001')
+        ac_idx = bs.traf.id2idx(self.agent)
         self.ac_hdg = bs.traf.hdg[ac_idx]
 
         # raw waypoint values (generation order) retained for _check_waypoint, _render_frame (approach C)
@@ -96,7 +98,7 @@ class PlanWaypointEnv(gym.Env):
             self.drift.append(fn.bound_angle_positive_negative_180(self.ac_hdg - wpt_qdr))
 
         # waypoints are sorted by distance; waypoint_status is reordered to match (per-slot reach flag)
-        return self.waypoint_obs.observe('KL001', self.wpt_lat, self.wpt_lon, reached_flags=self.wpt_reach)
+        return self.waypoint_obs.observe(self.agent, self.wpt_lat, self.wpt_lon, reached_flags=self.wpt_reach)
     
     def _get_info(self):
         # Here you implement any additional info that you want to return after a step,
@@ -129,7 +131,7 @@ class PlanWaypointEnv(gym.Env):
         self.total_reward = 0
         self.waypoints_completed = 0
 
-        bs.traf.cre('KL001',actype="A320",acspd=AC_SPD)
+        bs.traf.cre(self.agent,actype="A320",acspd=AC_SPD)
 
         self._generate_waypoint()
         observation = self._get_obs()
@@ -197,7 +199,7 @@ class PlanWaypointEnv(gym.Env):
         return reward
 
     def _render_frame(self):
-        ac_idx = bs.traf.id2idx('KL001')
+        ac_idx = bs.traf.id2idx(self.agent)
         self.projection.update_ref(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx])
         canvas = self.pygame_canvas.begin_frame()
 
