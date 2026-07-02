@@ -11,6 +11,7 @@ from core.rendering import (
     PygameCanvas, TopDownProjection,
     draw_aircraft, draw_intruder, draw_waypoint,
 )
+from core.actions import HeadingAction
 
 DISTANCE_MARGIN = 5 # km
 REACH_REWARD = 1
@@ -57,8 +58,9 @@ class HorizontalCREnv(gym.Env):
         })
 
         self.agent = "KL001"
-       
-        self.action_space = spaces.Box(-1, 1, shape=(1,), dtype=np.float64)
+
+        self.heading_action = HeadingAction(d_heading=D_HEADING)
+        self.action_space = self.heading_action.space()
 
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
@@ -225,10 +227,8 @@ class HorizontalCREnv(gym.Env):
         
         return reward
     
-    def _get_action(self,action):
-        action = self.ac_hdg + action * D_HEADING
-
-        bs.stack.stack(f"HDG KL001 {action[0]}")
+    def _get_action(self, action):
+        self.heading_action.execute(self.agent, action)
 
     def _render_frame(self):
         ac_idx = bs.traf.id2idx('KL001')
