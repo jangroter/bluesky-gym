@@ -110,14 +110,20 @@ class SpeedAction:
         bs.stack.stack(f"SPD {ac_id} {new_spd}")
 
 
-class VerticalAction:
+class VerticalSpeedAction:
     """
     Vertical speed action (climb/descend).
 
     The action is a normalized value in [-1, 1] (continuous) or a Discrete
-    index (discrete). Positive action → climb, negative → descend. The target
-    altitude selector is set to a very high/low value so the autopilot
-    executes the commanded vertical speed without a conflicting altitude target.
+    index (discrete). Positive action → climb, negative → descend.
+
+    BlueSky's autopilot (autopilot.py) replaces any selvs with |selvs| ≤ 0.1 m/s
+    with vsdef (1500 fpm ≈ 7.62 m/s), causing spurious full-rate climbs for
+    near-zero actions. For actions below this threshold we command level flight
+    explicitly by setting selalt = current altitude, so the autopilot sees zero
+    altitude error regardless of which vs it applies internally. Above the
+    threshold, selalt is set proportionally (current_alt + vs * SELALT_HORIZON)
+    so it is always far enough away to not be captured mid-episode.
 
     Parameters
     ----------
@@ -126,6 +132,10 @@ class VerticalAction:
     n_discrete : int or None
         None → continuous Box space. Integer N → Discrete(2*N+1) space.
     """
+
+    # BlueSky autopilot.py line 361: selvs below this threshold is replaced by vsdef
+    _BS_SELVS_THRESHOLD = 0.1  # m/s
+    SELALT_HORIZON = 3600  # seconds — far enough to never be captured mid-episode
 
     def __init__(self, vs_scale, n_discrete=None):
         self.vs_scale = vs_scale
@@ -141,11 +151,56 @@ class VerticalAction:
             action = _discrete_to_float(action, self.n_discrete)
         ac_idx = bs.traf.id2idx(ac_id)
         vs = float(action) * self.vs_scale
-        if vs >= 0:
-            bs.traf.selalt[ac_idx] = 1_000_000
+        if abs(vs) <= self._BS_SELVS_THRESHOLD:
+            # Level flight: selalt = current altitude so the autopilot sees
+            # zero error even though it will apply vsdef internally.
+            bs.traf.selalt[ac_idx] = bs.traf.alt[ac_idx]
+            bs.traf.selvs[ac_idx] = 0.0
         else:
-            bs.traf.selalt[ac_idx] = 0
-        bs.traf.selvs[ac_idx] = vs
+            target_alt = max(0.0, bs.traf.alt[ac_idx] + vs * self.SELALT_HORIZON)
+            bs.traf.selalt[ac_idx] = target_alt
+            bs.traf.selvs[ac_idx] = vs
+
+
+class AltitudeAction:
+    """
+    Relative altitude change action.
+
+    The action is a normalized value in [-1, 1] (continuous) or a Discrete
+    index (discrete). The ownship altitude is queried from the current BlueSky
+    simulation state and ``action * d_altitude`` is added to get the new target
+    altitude. BlueSky's autopilot then climbs/descends to that target at its
+    default vertical speed (vsdef ≈ 7.62 m/s / 1500 fpm).
+
+    This is the vertical analogue of HeadingAction: it commands where the
+    aircraft should go rather than how fast it should be moving.
+
+    Parameters
+    ----------
+    d_altitude : float
+        Maximum altitude change in metres (maps action ±1 to ±d_altitude m).
+    n_discrete : int or None
+        None → continuous Box space. Integer N → Discrete(2*N+1) space.
+    """
+
+    def __init__(self, d_altitude, n_discrete=None):
+        self.d_altitude = d_altitude
+        self.n_discrete = n_discrete
+
+    def space(self):
+        if self.n_discrete is None:
+            return spaces.Box(-1.0, 1.0, shape=(1,), dtype=np.float64)
+        return spaces.Discrete(2 * self.n_discrete + 1)
+
+    def execute(self, ac_id, action):
+        if self.n_discrete is not None:
+            action = _discrete_to_float(action, self.n_discrete)
+        ac_idx = bs.traf.id2idx(ac_id)
+        target_alt = bs.traf.alt[ac_idx] + float(action) * self.d_altitude
+        # selvs = 0 intentionally triggers BlueSky's vsdef (1500 fpm) so the
+        # aircraft climbs/descends at a sensible rate to reach the new target.
+        bs.traf.selalt[ac_idx] = max(0.0, target_alt)
+        bs.traf.selvs[ac_idx] = 0.0
 
 
 # ---------------------------------------------------------------------------
