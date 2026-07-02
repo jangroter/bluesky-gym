@@ -10,6 +10,7 @@ from core.rendering import (
     PygameCanvas, TopDownProjection,
     draw_aircraft, draw_intruder, draw_polygon,
 )
+from core.actions import HeadingAction, SpeedAction, combine_action_spaces
 
 AC_DENSITY_RANGE = (0.003, 0.007) # In AC/NM^2
 AC_DENSITY_MU = 0.003 # In AC/NM^2
@@ -25,7 +26,6 @@ AC_TYPE = "A320"
 
 # Conversion factors
 NM2KM = 1.852
-MpS2Kt = 1.94384
 FL2M = 30.48
 
 INTRUSION_DISTANCE = 5 # NM
@@ -63,7 +63,9 @@ class SectorCREnv(gym.Env):
 
         self.agent = "KL001"
 
-        self.action_space = spaces.Box(-1, 1, shape=(2,), dtype=np.float64)
+        self.heading_action = HeadingAction(d_heading=D_HEADING)
+        self.speed_action = SpeedAction(d_speed=D_VELOCITY)
+        self.action_space = combine_action_spaces([self.heading_action, self.speed_action])
 
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
@@ -260,13 +262,8 @@ class SectorCREnv(gym.Env):
         }
     
     def _get_action(self, action):
-        dh = action[0] * D_HEADING
-        dv = action[1] * D_VELOCITY
-        heading_new = fn.bound_angle_positive_negative_180(bs.traf.hdg[bs.traf.id2idx(self.agent)] + dh)
-        speed_new = (bs.traf.cas[bs.traf.id2idx(self.agent)] + dv) * MpS2Kt
-
-        bs.stack.stack(f"HDG {self.agent} {heading_new}")
-        bs.stack.stack(f"SPD {self.agent} {speed_new}")
+        self.heading_action.execute(self.agent, action[0])
+        self.speed_action.execute(self.agent, action[1])
 
     def _check_drift(self):
         drift = abs(np.deg2rad(self.drift))

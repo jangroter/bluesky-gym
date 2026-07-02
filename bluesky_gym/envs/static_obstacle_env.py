@@ -10,6 +10,7 @@ from core.rendering import (
     PygameCanvas, TopDownProjection,
     draw_aircraft, draw_waypoint, draw_polygon, RED_ORANGE,
 )
+from core.actions import HeadingAction, SpeedAction, combine_action_spaces
 
 DISTANCE_MARGIN = 5 # km
 
@@ -32,7 +33,6 @@ AC_SPD = 150 # kts
 ALTITUDE = 350 # In FL
 
 NM2KM = 1.852
-MpS2Kt = 1.94384
 
 ACTION_FREQUENCY = 10
 
@@ -69,8 +69,10 @@ class StaticObstacleEnv(gym.Env):
         })
 
         self.agent = "KL001"
-       
-        self.action_space = spaces.Box(-1, 1, shape=(2,), dtype=np.float64)
+
+        self.heading_action = HeadingAction(d_heading=D_HEADING)
+        self.speed_action = SpeedAction(d_speed=D_SPEED)
+        self.action_space = combine_action_spaces([self.heading_action, self.speed_action])
 
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
@@ -296,14 +298,9 @@ class StaticObstacleEnv(gym.Env):
                 terminate = 1
         return reward, terminate
 
-    def _get_action(self,action):
-        dh = action[0] * D_HEADING
-        dv = action[1] * D_SPEED
-        heading_new = fn.bound_angle_positive_negative_180(bs.traf.hdg[bs.traf.id2idx(self.agent)] + dh)
-        speed_new = (bs.traf.cas[bs.traf.id2idx(self.agent)] + dv) * MpS2Kt
-
-        bs.stack.stack(f"HDG {self.agent} {heading_new}")
-        bs.stack.stack(f"SPD {self.agent} {speed_new}")
+    def _get_action(self, action):
+        self.heading_action.execute(self.agent, action[0])
+        self.speed_action.execute(self.agent, action[1])
 
     def _render_frame(self):
         ac_idx = bs.traf.id2idx(self.agent)

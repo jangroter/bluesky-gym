@@ -15,6 +15,7 @@ from core.rendering import (
     draw_aircraft, draw_intruder, draw_waypoint, draw_radial_line, draw_line,
     BLACK, WHITE, BRIGHT_GREEN,
 )
+from core.actions import HeadingAction, SpeedAction, combine_action_spaces
 
 DISTANCE_MARGIN = 10 # km
 REACH_REWARD = 1
@@ -36,7 +37,6 @@ D_SPEED = 20
 AC_SPD = 100
 
 NM2KM = 1.852
-MpS2Kt = 1.94384
 
 ACTION_FREQUENCY = 10
 
@@ -77,8 +77,10 @@ class MergeEnv(gym.Env):
         })
 
         self.agent = "KL001"
-       
-        self.action_space = spaces.Box(-1, 1, shape=(2,), dtype=np.float64)
+
+        self.heading_action = HeadingAction(d_heading=D_HEADING)
+        self.speed_action = SpeedAction(d_speed=D_SPEED)
+        self.action_space = combine_action_spaces([self.heading_action, self.speed_action])
 
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
@@ -235,14 +237,9 @@ class MergeEnv(gym.Env):
                 reward += INTRUSION_PENALTY
         return reward    
 
-    def _get_action(self,action):
-        dh = action[0] * D_HEADING
-        dv = action[1] * D_SPEED
-        heading_new = fn.bound_angle_positive_negative_180(bs.traf.hdg[bs.traf.id2idx('KL001')] + dh)
-        speed_new = (bs.traf.cas[bs.traf.id2idx('KL001')] + dv) * MpS2Kt
-
-        bs.stack.stack(f"HDG KL001 {heading_new}")
-        bs.stack.stack(f"SPD KL001 {speed_new}")
+    def _get_action(self, action):
+        self.heading_action.execute(self.agent, action[0])
+        self.speed_action.execute(self.agent, action[1])
         
     def _render_frame(self):
         ac_idx = bs.traf.id2idx('KL001')
