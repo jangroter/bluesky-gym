@@ -7,6 +7,7 @@ from gymnasium import spaces
 
 from core.observations import WaypointObservation
 from core.rendering import PygameCanvas, TopDownProjection, draw_aircraft, draw_waypoint
+from core.actions import HeadingAction
 
 DISTANCE_MARGIN = 5 # km
 WAYPOINT_DISTANCE_MIN = 0
@@ -56,7 +57,8 @@ class PlanWaypointEnv(gym.Env):
             **self.waypoint_obs.space(),
         })
        
-        self.action_space = spaces.Box(-1, 1, shape=(1,), dtype=np.float64)
+        self.heading_action = HeadingAction(d_heading=D_HEADING)
+        self.action_space = self.heading_action.space()
 
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
@@ -118,13 +120,8 @@ class PlanWaypointEnv(gym.Env):
         else:
             return reach_reward, 1
         
-    def _get_action(self,action):
-
-        # Transform action to the change in heading
-        # action = np.random.randint(-100,100)/100
-        action = self.ac_hdg + action * D_HEADING
-
-        bs.stack.stack(f"HDG KL001 {action[0]}")
+    def _get_action(self, action):
+        self.heading_action.execute(self.agent, action)
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
