@@ -38,6 +38,9 @@ num_episodes = 100_000
 train_steps = 500 # first n transitions used for training, to control complexity of samples
 max_episode_length = 2500
 
+## BUG PER buffer uniform ratio is not properly reflected in the critic loss
+# so high TD-error transitions get downweighted without extra sampling.
+# Inverse of what was intended.
 Buffer = PrioritizedReplayBuffer(obs_dim = observation_dim,
                       action_dim = action_dim,
                       n_agents = n_agents,
