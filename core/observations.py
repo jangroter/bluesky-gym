@@ -7,6 +7,8 @@ import numpy as np
 import bluesky as bs
 from gymnasium import spaces
 
+from core.scenario import resample_perimeter
+
 NM2KM = 1.852
 
 
@@ -593,4 +595,63 @@ class ObstacleObservation:
             "obstacle_cos_bearing": cos_bearing,
             "obstacle_sin_bearing": sin_bearing,
             "obstacle_radius": radii / self.radius_norm,
+        }
+
+class SectorBoundaryObservation:
+    """
+    Distance and bearing to n points sampled evenly along the sector boundary,
+    plus a flag for whether the ownship is currently inside the sector.
+
+    The environment passes the sector polygon vertices (which vary in count per
+    episode); this class resamples them to exactly ``n`` points, evenly spaced
+    by arc length, so the observation has a fixed shape. The points are kept in
+    perimeter order — not sorted — so the boundary shape is presented stably.
+    Resampling is deterministic, so the same boundary is seen every step.
+
+    Parameters
+    ----------
+    n : int
+        Number of boundary points in the observation.
+    distance_norm : float
+        Normalization divisor for boundary distances (km).
+    """
+
+    def __init__(self, n=12, distance_norm=170.0):
+        self.n = n
+        self.distance_norm = distance_norm
+
+    def space(self):
+        shape = (self.n,)
+        return {
+            "sector_point_distance": spaces.Box(-np.inf, np.inf, shape=shape, dtype=np.float64),
+            "sector_point_cos_bearing": spaces.Box(-1.0, 1.0, shape=shape, dtype=np.float64),
+            "sector_point_sin_bearing": spaces.Box(-1.0, 1.0, shape=shape, dtype=np.float64),
+            "inside_sector": spaces.Box(0.0, 1.0, shape=(1,), dtype=np.float64),
+        }
+
+    def observe(self, ac_id, sector_vertices, inside):
+        ac_idx = bs.traf.id2idx(ac_id)
+
+        own_lat = bs.traf.lat[ac_idx]
+        own_lon = bs.traf.lon[ac_idx]
+        own_hdg = bs.traf.hdg[ac_idx]
+
+        boundary = resample_perimeter(sector_vertices, self.n)
+
+        distances = np.zeros(self.n)
+        cos_bearing = np.zeros(self.n)
+        sin_bearing = np.zeros(self.n)
+
+        for i in range(self.n):
+            qdr, dist = bs.tools.geo.kwikqdrdist(own_lat, own_lon, boundary[i, 0], boundary[i, 1])
+            bearing_rad = np.deg2rad(_bound_angle(own_hdg - qdr))
+            distances[i] = dist * NM2KM
+            cos_bearing[i] = np.cos(bearing_rad)
+            sin_bearing[i] = np.sin(bearing_rad)
+
+        return {
+            "sector_point_distance": distances / self.distance_norm,
+            "sector_point_cos_bearing": cos_bearing,
+            "sector_point_sin_bearing": sin_bearing,
+            "inside_sector": np.array([1.0 if inside else 0.0]),
         }

@@ -1,3 +1,15 @@
+"""
+Deterministic geo helpers used for competition scoring.
+
+This is a deliberate pure-Python copy of BlueSky's ``kwikqdrdist``. BlueSky
+silently swaps in compiled C implementations of its geo functions when they are
+available, and those results do not match the pure-Python ones bit-for-bit. All
+competition *metric* computations (intrusions, distances-to-goal, etc.) route
+through this copy so that scores are reproducible across machines regardless of
+whether a given install has the compiled extensions. Observation code, which is
+competitor-owned and not scored, may use ``bs.tools.geo`` directly.
+"""
+
 import numpy as np
 
 
