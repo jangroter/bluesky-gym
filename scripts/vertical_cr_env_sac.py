@@ -11,7 +11,7 @@ import bluesky_gym.envs
 
 bluesky_gym.register_envs()
 
-from scripts.common import logger
+from bluesky_gym.utils import logger
 
 # Initialize logger
 log_dir = './logs/vertical_cr_env/'
