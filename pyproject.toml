@@ -9,6 +9,7 @@ dependencies = [
     "numpy < 2.4.0",
     "bluesky-simulator>=1.0.7",
     "pyqt6>=6.11.0",
+    "shapely>=2.1.2",
 ]
 
 authors = [
