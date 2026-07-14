@@ -10,6 +10,7 @@ dependencies = [
     "bluesky-simulator>=1.0.7",
     "pyqt6>=6.11.0",
     "shapely>=2.1.2",
+    "pettingzoo>=1.26.1",
 ]
 
 authors = [
