@@ -62,7 +62,7 @@ class Route:
 
 @dataclass
 class AgentSpec:
-    """The controlled agent's start and goal.
+    """A controlled agent's start and goal.
 
     heading is the initial true heading in degrees (the generator points it at
     the goal); speed is in m/s.
@@ -80,8 +80,17 @@ class Scenario:
     center: tuple                       # (lat, lon) projection/render reference
     sector: list                        # list of (lat, lon), clockwise, unclosed
     obstacles: list = field(default_factory=list)
-    agents: list = field(default_factory=list)          # length 1 now; list for MARL later
+    agents: list = field(default_factory=list)          # one AgentSpec per controlled aircraft
     intruder_routes: list = field(default_factory=list)
+
+
+def agent_callsigns(n):
+    """Aircraft ids for ``n`` controlled agents: KL001, KL002, ...
+
+    Follows the existing convention (KL001..KL009, then KL0010, ...); the
+    inconsistent width past 9 agents is a known quirk kept for now.
+    """
+    return [f"KL00{i + 1}" for i in range(n)]
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +117,11 @@ def _bearing_nm(p_from, p_to):
     dx = p_to[0] - p_from[0]   # north
     dy = p_to[1] - p_from[1]   # east
     return math.degrees(math.atan2(dy, dx)) % 360.0
+
+
+def _separated(p, others, min_d):
+    """True if NM-frame point ``p`` is at least ``min_d`` NM from every point in ``others``."""
+    return all(math.hypot(p[0] - o[0], p[1] - o[1]) >= min_d for o in others)
 
 
 def resample_perimeter(vertices, n):
@@ -144,14 +158,22 @@ class ScenarioGenerator:
     n_obstacles, n_intruders : int
         Target counts. Fewer obstacles may result if placement repeatedly
         fails (the env zero-pads observation slots).
+    n_agents : int
+        Number of controlled agents (one AgentSpec each in ``Scenario.agents``).
     sector_area_range, obstacle_area_range : (min, max) in NM^2.
     goal_distance_range : (min, max) straight-line agent start->goal distance in km.
     agent_speed : m/s.
     intruder_speed_range : (min, max) m/s.
     center : (lat, lon) reference for the flat NM frame.
+    agent_separation_nm : float
+        Minimum spacing between different agents' start points. Keep above
+        the intrusion distance so no episode begins with agents in conflict
+        at their spawn points. Goals are unconstrained relative to each other
+        (they may coincide); each start is far from its own goal via
+        ``goal_distance_range``.
     """
 
-    def __init__(self, n_obstacles=5, n_intruders=5,
+    def __init__(self, n_obstacles=5, n_intruders=5, n_agents=1,
                  sector_area_range=(15_000, 23_000),
                  obstacle_area_range=(50, 1000),
                  goal_distance_range=(100, 170),
@@ -160,9 +182,11 @@ class ScenarioGenerator:
                  center=(52.0, 4.0),
                  agent_start_margin_nm=10.0,
                  obstacle_clearance_nm=2.0,
-                 route_agent_proximity_nm=15.0):
+                 route_agent_proximity_nm=15.0,
+                 agent_separation_nm=10.0):
         self.n_obstacles = n_obstacles
         self.n_intruders = n_intruders
+        self.n_agents = n_agents
         self.sector_area_range = sector_area_range
         self.obstacle_area_range = obstacle_area_range
         self.goal_distance_range = goal_distance_range
@@ -172,6 +196,7 @@ class ScenarioGenerator:
         self.agent_start_margin_nm = agent_start_margin_nm
         self.obstacle_clearance_nm = obstacle_clearance_nm
         self.route_agent_proximity_nm = route_agent_proximity_nm
+        self.agent_separation_nm = agent_separation_nm
 
     # -- sector --------------------------------------------------------------
     def _generate_sector(self, rng):
@@ -209,7 +234,7 @@ class ScenarioGenerator:
         return obstacle_polys
 
     # -- agent ---------------------------------------------------------------
-    def _generate_agent(self, rng, sector_poly, obstacle_polys):
+    def _generate_agent(self, rng, sector_poly, obstacle_polys, existing_starts=()):
         minx, miny, maxx, maxy = sector_poly.bounds
         obstacle_buffers = [o.buffer(self.obstacle_clearance_nm) for o in obstacle_polys]
         goal_min, goal_max = self.goal_distance_range
@@ -225,6 +250,8 @@ class ScenarioGenerator:
                 s = (rng.uniform(minx, maxx), rng.uniform(miny, maxy))
                 if not (_valid(inner, s) if buffers_on else inner.contains(Point(s))):
                     continue
+                if not _separated(s, existing_starts, self.agent_separation_nm):
+                    continue
                 g = (rng.uniform(minx, maxx), rng.uniform(miny, maxy))
                 if not (_valid(inner, g) if buffers_on else inner.contains(Point(g))):
                     continue
@@ -233,16 +260,28 @@ class ScenarioGenerator:
                     return s, g
             return None
 
-        result = _try(sector_poly.buffer(-self.agent_start_margin_nm), True)
-        if result is None:
+        placement = _try(sector_poly.buffer(-self.agent_start_margin_nm), True)
+        if placement is None:
             # relax: smaller inward margin, drop the obstacle clearance
-            result = _try(sector_poly.buffer(-self.agent_start_margin_nm / 2.0), False)
-        if result is None:
+            # (start separation is kept — it prevents episodes that begin in intrusion)
+            placement = _try(sector_poly.buffer(-self.agent_start_margin_nm / 2.0), False)
+        if placement is None:
             raise ValueError(
                 "ScenarioGenerator: could not place agent start/goal; "
-                "check sector/obstacle/goal-distance parameters."
+                "check sector/obstacle/goal-distance/separation parameters."
             )
-        return result
+        start, goal = placement
+        return start, goal
+
+    def _generate_agents(self, rng, sector_poly, obstacle_polys):
+        """Place ``n_agents`` (start, goal) pairs with mutually separated starts."""
+        starts, goals = [], []
+        for _ in range(self.n_agents):
+            start, goal = self._generate_agent(rng, sector_poly, obstacle_polys,
+                                               existing_starts=starts)
+            starts.append(start)
+            goals.append(goal)
+        return list(zip(starts, goals))
 
     # -- intruder routes -----------------------------------------------------
     def _generate_routes(self, rng, sector_poly, obstacle_polys, start, goal):
@@ -314,8 +353,9 @@ class ScenarioGenerator:
     def generate(self, rng):
         sector_nm, sector_poly = self._generate_sector(rng)
         obstacle_polys = self._generate_obstacles(rng, sector_poly)
-        start, goal = self._generate_agent(rng, sector_poly, obstacle_polys)
-        routes = self._generate_routes(rng, sector_poly, obstacle_polys, start, goal)
+        agent_pairs = self._generate_agents(rng, sector_poly, obstacle_polys)
+        # intruder routes are biased toward the first agent's start->goal line
+        routes = self._generate_routes(rng, sector_poly, obstacle_polys, *agent_pairs[0])
 
         sector_ll = [_nm_to_latlon(self.center, p) for p in sector_nm]
         obstacles = []
@@ -327,18 +367,21 @@ class ScenarioGenerator:
                 kind=kind,
             ))
 
-        agent = AgentSpec(
-            ac_id="KL001",
-            start=_nm_to_latlon(self.center, start),
-            goal=_nm_to_latlon(self.center, goal),
-            heading=_bearing_nm(start, goal),
-            speed=self.agent_speed,
-        )
+        agents = [
+            AgentSpec(
+                ac_id=ac_id,
+                start=_nm_to_latlon(self.center, start),
+                goal=_nm_to_latlon(self.center, goal),
+                heading=_bearing_nm(start, goal),
+                speed=self.agent_speed,
+            )
+            for ac_id, (start, goal) in zip(agent_callsigns(self.n_agents), agent_pairs)
+        ]
 
         return Scenario(
             center=tuple(self.center),
             sector=sector_ll,
             obstacles=obstacles,
-            agents=[agent],
+            agents=agents,
             intruder_routes=routes,
         )

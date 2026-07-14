@@ -51,10 +51,11 @@ build-backend = "hatchling.build"
 source = "vcs"
 
 [tool.hatch.build.targets.wheel]
-packages = ["bluesky_gym", "core"]
+packages = ["bluesky_gym", "core", "bluesky_zoo"]
 
 [tool.hatch.build.targets.sdist]
 include = [
   "bluesky_gym/*",
   "core/*",
+  "bluesky_zoo/*",
 ]
