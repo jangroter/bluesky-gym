@@ -1,5 +1,5 @@
 """
-Manual smoke test for the competition environment.
+Manual test for the competition environment.
 
 Runs a few episodes with human rendering and a neutral (fly-straight) action,
 printing the objective scoring metrics from the info dict at the end of each
