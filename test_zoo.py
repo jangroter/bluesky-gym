@@ -1,5 +1,5 @@
 """
-Manual smoke test for the multi-agent competition environment.
+Manual test for the multi-agent competition environment.
 
 Runs a few episodes with human rendering and neutral (fly-straight) actions
 for every agent, printing each agent's objective scoring metrics as it leaves
