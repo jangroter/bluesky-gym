@@ -60,7 +60,7 @@ class FlattenObs(BaseParallelWrapper):
 
 
 SEED = 0
-N_AGENTS = 3
+N_AGENTS = 10        # competition config; lower it for quicker local iteration
 EVAL_EPISODES = 12   # per-agent episodes to average over
 MODEL_PATH = "ppo_competition"
 

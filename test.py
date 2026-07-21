@@ -14,10 +14,10 @@ bluesky_gym.register_envs()
 env_name = 'CompetitionEnv-v0'
 env = gym.make(env_name, render_mode="human")
 
-n_eps = 3
+n_eps = 10
 for i in range(n_eps):
     terminated = truncated = False
-    obs, info = env.reset(seed=i)
+    obs, info = env.reset(seed=i*i+5)
     while not (terminated or truncated):
         action = [0.0, 0.0]   # neutral: keep current heading and speed
         obs, reward, terminated, truncated, info = env.step(action)

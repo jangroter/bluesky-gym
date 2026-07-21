@@ -10,7 +10,7 @@ import numpy as np
 
 from bluesky_zoo.competition_v0 import CompetitionZooEnv
 
-env = CompetitionZooEnv(render_mode="human", n_agents=4)
+env = CompetitionZooEnv(render_mode="human", n_agents=10)   # competition config
 
 n_eps = 3
 for i in range(n_eps):
