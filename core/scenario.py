@@ -175,13 +175,13 @@ class ScenarioGenerator:
 
     def __init__(self, n_obstacles=5, n_intruders=5, n_agents=1,
                  sector_area_range=(15_000, 23_000),
-                 obstacle_area_range=(50, 1000),
+                 obstacle_area_range=(500, 1500),
                  goal_distance_range=(100, 170),
                  agent_speed=150.0,
                  intruder_speed_range=(120, 180),
                  center=(52.0, 4.0),
                  agent_start_margin_nm=10.0,
-                 obstacle_clearance_nm=2.0,
+                 obstacle_clearance_nm=10.0,
                  route_agent_proximity_nm=15.0,
                  agent_separation_nm=10.0):
         self.n_obstacles = n_obstacles
