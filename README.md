@@ -16,8 +16,8 @@ to their goals while avoiding conflicts, restricted areas, and sector exits — 
 a single-agent (required) and a multi-agent (stretch) environment.
 
 <p align="center">
-    <img src="docs/media/competition/single_agent.gif" width="45%">
-    <img src="docs/media/competition/multi_agent.gif" width="45%"><br/>
+    <img src="docs/media/competition/single_agent.gif" width="25%">
+    <img src="docs/media/competition/multi_agent.gif" width="25%"><br/>
     <em>Left: single-agent competition env. Right: multi-agent competition env (neutral policy shown).</em>
 </p>
 
