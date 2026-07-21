@@ -9,6 +9,23 @@ Built on [BlueSky](https://github.com/TUDelft-CNS-ATM/bluesky) and The Farama Fo
 
 For a complete list of the currently available environments click [here](bluesky_gym/envs/README.md)
 
+## 🏆 RL Competition
+
+This repository hosts an **air traffic control RL competition**: guide aircraft
+to their goals while avoiding conflicts, restricted areas, and sector exits — in
+a single-agent (required) and a multi-agent (stretch) environment.
+
+<p align="center">
+    <img src="docs/media/competition/single_agent.gif" width="45%">
+    <img src="docs/media/competition/multi_agent.gif" width="45%"><br/>
+    <em>Left: single-agent competition env. Right: multi-agent competition env (neutral policy shown).</em>
+</p>
+
+- **[Competition outline & rules](docs/competition/COMPETITION.md)** — what you may
+  change, what is fixed, the metrics, and how you are scored.
+- **[Getting started guide](docs/competition/GETTING_STARTED.md)** — install, run
+  the demo scripts, understand `train_zoo.py`, and customize the MDP.
+
 ## Installation
 
 `pip install bluesky-gym`
