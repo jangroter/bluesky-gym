@@ -83,10 +83,10 @@ def parallel_env(**kwargs):
 class CompetitionZooEnv(ParallelEnv):
     """Multi-agent RL competition environment (see module docstring)."""
 
-    metadata = {"name": "competition_v0", "render_modes": ["human"], "render_fps": 120}
+    metadata = {"name": "competition_v0", "render_modes": ["human", "rgb_array"], "render_fps": 120}
 
     def __init__(self, render_mode=None, scenario=None,
-                 n_agents=4, n_obstacles=8,
+                 n_agents=10, n_obstacles=5,
                  # MDP tuning (competitor-facing)
                  d_heading=45.0, d_speed=20 / 3, action_frequency=10,
                  reach_reward=1.0, drift_penalty=-0.01, intrusion_penalty=-1.0,
@@ -177,7 +177,8 @@ class CompetitionZooEnv(ParallelEnv):
         self._area_names = []
         self.metrics = {}
 
-        self.pygame_canvas = PygameCanvas(self.window_width, self.window_height)
+        self.pygame_canvas = PygameCanvas(self.window_width, self.window_height,
+                                          mode=render_mode)
         self.projection = TopDownProjection(
             max_distance=350, ref_lat=center[0], ref_lon=center[1],
             window_size=self.window_size)
@@ -445,7 +446,11 @@ class CompetitionZooEnv(ParallelEnv):
 
     # ---------------------------------------------------------------- render
     def render(self):
-        # human rendering happens inside step(); nothing to return
+        # rgb_array returns a frame; human rendering happens inside step()/reset()
+        if self.render_mode == "rgb_array":
+            canvas = self.pygame_canvas.begin_frame()
+            self._draw_world(canvas)
+            return self.pygame_canvas.end_frame(canvas)
         return None
 
     def _render_frame(self):

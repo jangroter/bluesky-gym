@@ -76,7 +76,7 @@ class CompetitionEnv(gym.Env):
     DRAW_ROUTES = True
 
     def __init__(self, render_mode=None, scenario=None,
-                 n_intruders=10, n_obstacles=8,
+                 n_intruders=10, n_obstacles=5,
                  # MDP tuning (competitor-facing)
                  d_heading=45.0, d_speed=20 / 3, action_frequency=10,
                  reach_reward=1.0, drift_penalty=-0.01, intrusion_penalty=-1.0,
@@ -153,7 +153,8 @@ class CompetitionEnv(gym.Env):
         self._area_names = []
         self.metrics = {}
 
-        self.pygame_canvas = PygameCanvas(self.window_width, self.window_height)
+        self.pygame_canvas = PygameCanvas(self.window_width, self.window_height,
+                                          mode=render_mode)
         self.projection = TopDownProjection(
             max_distance=350, ref_lat=center[0], ref_lon=center[1],
             window_size=self.window_size)
@@ -376,9 +377,20 @@ class CompetitionEnv(gym.Env):
         return bool(bs.tools.areafilter.checkInside(name, lat_a, lon_a, alt_a)[0])
 
     # ---------------------------------------------------------------- render
+    def render(self):
+        # rgb_array returns a frame; human rendering happens inside step()/reset()
+        if self.render_mode == "rgb_array":
+            canvas = self.pygame_canvas.begin_frame()
+            self._draw_world(canvas)
+            return self.pygame_canvas.end_frame(canvas)
+        return None
+
     def _render_frame(self):
         canvas = self.pygame_canvas.begin_frame()
+        self._draw_world(canvas)
+        self.pygame_canvas.end_frame(canvas)
 
+    def _draw_world(self, canvas):
         # sector outline
         sector_px = [self.projection.project(lat, lon) for lat, lon in self.scenario.sector]
         draw_polygon(canvas, sector_px, color=BRIGHT_GREEN, filled=False, width=2)
@@ -419,8 +431,6 @@ class CompetitionEnv(gym.Env):
         ax, ay = self.projection.project(bs.traf.lat[ac_idx], bs.traf.lon[ac_idx])
         draw_aircraft(canvas, ax, ay, bs.traf.hdg[ac_idx],
                       body_km=8, heading_km=20, projection=self.projection, color="black")
-
-        self.pygame_canvas.end_frame(canvas)
 
     def close(self):
         bs.stack.stack("quit")

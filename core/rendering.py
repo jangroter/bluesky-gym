@@ -31,33 +31,47 @@ RED_ORANGE = (235, 52, 52)
 # Canvas
 # ---------------------------------------------------------------------------
 class PygameCanvas:
-    """Manages a pygame window and per-frame surface lifecycle."""
+    """Manages a pygame window and per-frame surface lifecycle.
 
-    def __init__(self, width, height, render_fps=120, bg_color=SKY_BLUE):
+    In ``mode="human"`` (default) frames are blitted to a live pygame window.
+    In ``mode="rgb_array"`` no window is opened; ``end_frame`` instead returns
+    the frame as an ``(H, W, 3)`` uint8 array, so rendering works headless
+    (e.g. with ``SDL_VIDEODRIVER=dummy``) for recording GIFs/videos.
+    """
+
+    def __init__(self, width, height, render_fps=120, bg_color=SKY_BLUE, mode="human"):
         self.width = width
         self.height = height
         self.window_size = (width, height)
         self.render_fps = render_fps
         self.bg_color = bg_color
+        self.mode = mode
         self.window = None
         self.clock = None
 
     def begin_frame(self):
-        if self.window is None:
-            pygame.init()
-            pygame.display.init()
-            self.window = pygame.display.set_mode(self.window_size)
-        if self.clock is None:
-            self.clock = pygame.time.Clock()
+        if self.mode == "human":
+            if self.window is None:
+                pygame.init()
+                pygame.display.init()
+                self.window = pygame.display.set_mode(self.window_size)
+            if self.clock is None:
+                self.clock = pygame.time.Clock()
+        elif not pygame.get_init():
+            pygame.init()   # offscreen: no display window needed
         canvas = pygame.Surface(self.window_size)
         canvas.fill(self.bg_color)
         return canvas
 
     def end_frame(self, canvas):
+        if self.mode != "human":
+            # offscreen: return the frame as an (H, W, 3) uint8 array
+            return np.transpose(pygame.surfarray.array3d(canvas), (1, 0, 2))
         self.window.blit(canvas, canvas.get_rect())
         pygame.event.pump()
         pygame.display.update()
         self.clock.tick(self.render_fps)
+        return None
 
 
 # ---------------------------------------------------------------------------
