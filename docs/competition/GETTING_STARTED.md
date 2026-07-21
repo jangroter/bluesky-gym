@@ -19,15 +19,11 @@ uv sync
 .venv/bin/python test.py
 ```
 
-The rest of this guide writes `python`; use `.venv/bin/python` (or `uv run
-python`) to hit the project environment. Key dependencies: `bluesky-simulator`,
-`gymnasium`, `pettingzoo`, `stable-baselines3`, `supersuit`, `torch`, `pygame`.
-
 Two ways to run code, depending on where the file lives:
 
 - **repo-root scripts** (`test.py`, `test_zoo.py`, `train_zoo.py`): `python test.py`
 - **`scripts/` modules** (`evaluate_competition`, `record_competition_gifs`):
-  run as a module from the repo root, e.g. `python -m scripts.evaluate_competition`.
+  run as a module from the repo root, e.g. `python -m scripts.evaluate_competition` or `uv run python -m scripts.evaluate_competition`.
 
 ---
 
@@ -61,8 +57,8 @@ python test_zoo.py
 ## 3. The example training script — [`train_zoo.py`](../../train_zoo.py)
 
 `train_zoo.py` is a **simple but functional** learning setup for the
-multi-agent environment. It is a *learnability sanity check* (mean per-agent
-return before vs. after training), not a tuned solution — a good starting point
+multi-agent environment. It is a *learnability sanity check* (checks if the mean per-agent
+return before vs. after training is better), not a tuned solution. A potential starting point
 to build on.
 
 ```bash
@@ -73,8 +69,8 @@ python train_zoo.py replay            # load it and render a greedy rollout
 **Algorithm.** Stable-Baselines3 `PPO` with an `MlpPolicy`, using **parameter
 sharing** — one shared policy drives all 10 (homogeneous) agents.
 
-**The wrapper stack** (in `make_vec_env`) turns the PettingZoo `ParallelEnv`
-into something SB3 can train on:
+**Necessary wrappers** (in `make_vec_env`) turns the PettingZoo `ParallelEnv`
+into something SB3 can train on (virtually changing it to a single-agent environment):
 
 1. `FlattenObs` — flattens each agent's `Dict` observation into a 1-D `Box`
    (SuperSuit's `flatten_v0` only handles `Box`, not `Dict`), so a plain
@@ -89,7 +85,7 @@ into something SB3 can train on:
 **Why a single underlying env matters:** BlueSky is a **process-global
 singleton** — only one BlueSky-backed environment can be active per process.
 That is why the script uses `pettingzoo_env_to_vec_env_v1` (one env, N agent
-views) and **not** `concat_vec_envs_v1` (which would spin up multiple envs).
+views) and **not** `concat_vec_envs_v1` (which would create multiple envs pointing to the same BlueSky instance).
 
 **Hyperparameters** (deliberately modest): `n_steps=512`, `batch_size=128`,
 `gamma=0.99`, `gae_lambda=0.95`, `learning_rate=3e-4`, `ent_coef=0.0`,
@@ -113,8 +109,9 @@ from bluesky_gym.envs.competition_env import CompetitionEnv
 class MyEnv(CompetitionEnv):
     def _get_reward(self, ac_id):
         # your reward shaping (does NOT affect the scored metrics)
-        base = super()._get_reward(ac_id)
-        return base
+        reward = super()._get_reward(ac_id)
+        reward += self._my_custom_reward_component(ac_id)
+        return reward
 ```
 
 Or via a standard wrapper (no subclass needed):
@@ -130,9 +127,12 @@ Both environment source files have detailed docstrings describing the contract:
 [`competition_env.py`](../../bluesky_gym/envs/competition_env.py) and
 [`competition.py`](../../bluesky_zoo/competition/competition.py).
 
-### Train on the single-agent (required) track
+See the [windfield wrapper](../../bluesky_gym/wrappers/wind.py) for an example wrapper
+that also modifies the observation function. 
 
-There is no bundled single-agent trainer, but SB3 handles it directly. The
+### Train on the single-agent track
+
+There is no bundled single-agent trainer, because SB3 handles it directly. The
 observation is a `Dict`, so either use `MultiInputPolicy`, or flatten it and use
 `MlpPolicy`:
 
@@ -148,14 +148,11 @@ model.learn(total_timesteps=1_000_000)
 model.save("ppo_competition_sa")
 ```
 
-(The env truncates itself at 3000 simulated seconds, so no `TimeLimit` wrapper
-is needed.)
-
 ---
 
 ## 5. Reference
 
-### Observation (shipped default)
+### Observation (base class)
 
 A `Dict` of these components (flattened: **131** dims single-agent, **124**
 multi-agent with `n_agents=10`). All bearings are cos/sin pairs; distances are
@@ -177,6 +174,12 @@ N = number of intruders shown (single-agent 10; multi-agent `n_agents − 1` = 9
 default 45°), `action[1]` scales a speed change (× `d_speed`, default ≈6.67 kt),
 both relative to the current state. `[0, 0]` keeps heading and speed.
 
+Current action space is continuous, [discrete action spaces](../../core/actions.py) are available. 
+
+Note that the action space is deliberately **2D**. Allowing altitude differences 
+trivializes the separation management task for the traffic densities simulated
+and is not within the scope of this competition
+
 ### Metrics
 
 See the [metrics table in COMPETITION.md](COMPETITION.md#metrics-the-objective-score).
@@ -187,8 +190,8 @@ See the [metrics table in COMPETITION.md](COMPETITION.md#metrics-the-objective-s
 
 ```bash
 # official metrics over the first 1000 episodes of seed 42
-python -m scripts.evaluate_competition --env sa                  # required
-python -m scripts.evaluate_competition --env ma                  # stretch
+python -m scripts.evaluate_competition --env sa                
+python -m scripts.evaluate_competition --env ma                
 
 # quick check + your trained policy (see load_policy in the script)
 python -m scripts.evaluate_competition --env sa --episodes 20
@@ -198,5 +201,5 @@ python -m scripts.record_competition_gifs                        # both doc GIFs
 python -m scripts.record_competition_gifs --env sa --seeds 1 2 3 4 5 --out reel.gif
 ```
 
-Both scripts have two clearly-marked edit points (an env factory and a
-model/policy loader) — plug in your subclass and trained model there.
+Both scripts have two clearly-marked edit points (an env builder and a
+model/policy loader). Plug in your subclass and trained model there.

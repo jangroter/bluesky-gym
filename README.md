@@ -26,6 +26,17 @@ a single-agent (required) and a multi-agent (stretch) environment.
 - **[Getting started guide](docs/competition/GETTING_STARTED.md)** — install, run
   the demo scripts, understand `train_zoo.py`, and customize the MDP.
 
+## Submission & logistics
+
+> **ORGANIZER TO CONFIRM** — the items below are placeholders.
+
+- **Deadline:** _TBD_
+- **How to submit:** _TBD (report + video; code/model on request)_
+- **Team size:** _TBD_
+- **Prizes:** _TBD_
+- **Eligibility:** _TBD_
+- **Questions / contact:** _TBD_
+
 ## Installation
 
 `pip install bluesky-gym`

@@ -42,8 +42,8 @@ and truncates for everyone once the simulated **3000 s** time budget is spent.
 | Other traffic | 10 scripted intruders on fixed routes | the other 9 agents (no scripted intruders) |
 | Import | `gym.make("CompetitionEnv-v0")` | `from bluesky_zoo.competition_v0 import CompetitionZooEnv` |
 
-The **single-agent environment is the main testing ground and is required.**
-The **multi-agent environment is a stretch goal** — see [Scoring](#how-you-are-scored).
+The **single-agent environment is the main testing ground**
+The **multi-agent environment is the main scoring goal** — see [Scoring](#how-you-are-scored).
 
 ---
 
@@ -85,18 +85,17 @@ same code works for both environments.
 
 - **The environment is 2-D.** All aircraft fly at one shared altitude and there
   are **no vertical / altitude actions**. Being able to separate traffic by
-  altitude would make conflict resolution trivial — that is not the problem here.
+  altitude would make conflict resolution trivial.
 - **The scoring layer** — `_update_metrics` / `_get_info` and the nine
   [metrics](#metrics-the-objective-score). This is the objective score; do not
-  override it. Scoring distances use the deterministic
-  [`core/tools.py::kwikqdrdist`](../../core/tools.py) so scores are reproducible
-  across machines.
+  override it. 
 - **The rules of the world:** separation minimum **5 NM**, waypoint capture
-  radius **5 km**, episode budget **3000 s**, **1-second** metric sampling,
+  radius **5 km**, episode time budget **3000 s**, **1-second** metric sampling,
   A320 dynamics, and BlueSky's own conflict resolution left **off** (`RESO OFF`).
 - **The scenario distribution** in [`core/scenario.py`](../../core/scenario.py)
   (sector shapes, obstacle counts/sizes, start/goal placement, intruder routes).
-  You train on the seeded distribution but must not modify it for evaluation.
+  You train on the seeded distribution or custom defined (sub-classed) scenarios,
+  for example to change traffic density, but must use the original for evaluation.
 - **The evaluation configuration:** default constructor parameters, evaluated on
   **seed 42** (see below). Fixed sizes: **single-agent** `n_intruders=10,
   n_obstacles=5`; **multi-agent** `n_agents=10, n_obstacles=5`.
@@ -130,7 +129,7 @@ formula — judges weigh these together with novelty and documentation (below).
 ### Reporting protocol
 
 Report your metrics over the **first 1000 episodes of seed 42**, produced by the
-official harness:
+official evaluation script:
 
 ```bash
 python -m scripts.evaluate_competition --env sa      
@@ -138,7 +137,7 @@ python -m scripts.evaluate_competition --env ma
 ```
 
 Seed 42 is set on the first reset only; the RNG stream then continues, giving a
-fixed, reproducible sequence of 1000 scenarios. Run the harness on **your own
+fixed, reproducible sequence of 1000 scenarios. Run the script on **your own
 env subclass / wrappers with your trained policy loaded** (two clearly marked
 edit points in the script). It prints the metrics table and writes a
 per-episode CSV.
@@ -151,6 +150,8 @@ per-episode CSV.
 2. A **short video of your policy on 5 scenarios** (you may cherry-pick seeds to
    highlight interesting or emergent behaviour). The GIF recorder produces this:
    `python -m scripts.record_competition_gifs --env sa --seeds 1 2 3 4 5 --out my_reel.gif`.
+   (Make sure to provide your own policy, and change the code to use your own environment/wrappers
+   if you have changed any of that)
 3. Your **code and trained model must be shareable on request** so judges can
    reproduce the reported numbers.
 
@@ -162,9 +163,9 @@ Entries are judged on three axes:
 - **Performance** on the metrics,
 - **Quality** of the report and documentation.
 
-**Single-agent is the main track and is required.** The multi-agent environment
-is a high-value stretch: if you are the only team (or one of very few) to reach
-good multi-agent performance, that is effectively decisive — provided your
+**Single-agent is the baseline.** The multi-agent environment
+is a high-value performance goal: if you are the only team (or one of very few) to reach
+good multi-agent performance, that is effectively decisive. provided your
 reporting and novelty also hold up.
 
 ---
@@ -188,4 +189,4 @@ reporting and novelty also hold up.
   scripts, understand `train_zoo.py`, and customize the MDP.
 - Environment source: [`bluesky_gym/envs/competition_env.py`](../../bluesky_gym/envs/competition_env.py)
   (single-agent) and [`bluesky_zoo/competition/competition.py`](../../bluesky_zoo/competition/competition.py)
-  (multi-agent) — both have detailed module docstrings.
+  (multi-agent)
