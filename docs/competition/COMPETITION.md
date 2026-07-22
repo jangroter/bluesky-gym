@@ -172,14 +172,12 @@ reporting and novelty also hold up.
 
 ## Submission & logistics
 
-> **ORGANIZER TO CONFIRM** — the items below are placeholders.
-
-- **Deadline:** _TBD_
-- **How to submit:** _TBD (report + video; code/model on request)_
-- **Team size:** _TBD_
-- **Prizes:** _TBD_
-- **Eligibility:** _TBD_
-- **Questions / contact:** _TBD_
+- **Deadline:** 30th of November 2026
+- **How to submit:** Submit report including metrics and video(s) of the trained policy through email before the deadline
+- **Team size:** No limit
+- **Prizes:** Prize money depending on funding, will be updated once known
+- **Eligibility:** Everyone
+- **Questions / contact:** Join our [Discord](https://discord.gg/s7CdxcSX) or email: d.j.groot@tudelft.nl
 
 ---
 
