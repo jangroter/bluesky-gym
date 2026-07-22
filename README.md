@@ -11,8 +11,8 @@ For a complete list of the currently available environments click [here](bluesky
 
 ## 🏆 RL Competition
 
-This repository hosts an **air traffic control RL competition**: guide aircraft
-to their goals while avoiding conflicts, restricted areas, and sector exits in
+This repository hosts an **air traffic control RL competition** organized by the TU Delft and [AI4REAL-NET](https://ai4realnet.eu/): 
+Guide aircraft to their goals while avoiding conflicts, restricted areas, and sector exits in
 a single-agent and a multi-agent environment.
 
 <p align="center">
@@ -29,7 +29,7 @@ a single-agent and a multi-agent environment.
 ## Submission & logistics
 
 - **Deadline:** 30th of November 2026
-- **How to submit:** Submit report including metrics and video(s) of the trained policy through email before the deadline
+- **How to submit:** Submit a technical report including metrics and video(s) of the trained policy to the email below, your latest submission will be graded
 - **Team size:** No limit
 - **Prizes:** Prize money depending on funding, will be updated once known
 - **Eligibility:** Everyone
